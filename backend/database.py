@@ -31,8 +31,8 @@ class Event(Base):
     child_id = Column(String, nullable=False, index=True)
     type = Column(String, nullable=False) # url or text
     content = Column(String, nullable=False) # actual url or text
-    risk_label = Column(String, nullable=False)
-    risk_confidence = Column(String, nullable=False)
+    risk_label = Column(String, nullable=True)
+    risk_confidence = Column(String, nullable=True)
     timestamp = Column(DateTime, default= lambda: datetime.now(timezone.utc), index=True)
 
 class Alert(Base):

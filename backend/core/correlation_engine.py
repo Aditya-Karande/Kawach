@@ -139,3 +139,5 @@ def build_simple_explanation(
     else:
         minutes = int(window.total_seconds() // 60)
         timeframe_desc = f"within the last {minutes} minutes." 
+
+    return f"{len(risky_events)} concerning signals detected: {summary}, {timeframe_desc}."

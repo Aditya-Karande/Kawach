@@ -29,7 +29,7 @@ def check_for_pattern(
     short_term_alert = _check_window(
         child_id=child_id,
         db=db,
-        window=timedelta(SHORT_WINDOW_MINUTES),
+        window=timedelta(minutes=SHORT_WINDOW_MINUTES),
         threshold=SHORT_TERM_THRESHOLD,
         pattern_type="short_term"
     )
@@ -78,7 +78,7 @@ def _check_window(
 
     return{
         "alert_id":new_alert.id,
-        "child_if":child_id,
+        "child_id":child_id,
         "risk_level":risk_level,
         "explanation":explanation,
         "triggred_by_event_count":len(risky_events),
@@ -93,7 +93,7 @@ def _check_long_term(
     Long-term check, with a cooldown so we don't spam duplicate alerts
     for the same slow-building pattern every time a new event comes in.
     """
-    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(LONG_TERM_ALERT_COOLDOWN_HOURS)
+    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(hours=LONG_TERM_ALERT_COOLDOWN_HOURS)
 
     recent_long_term_alert = (
         db.query(Alert)

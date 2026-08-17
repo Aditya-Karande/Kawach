@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from database import get_db, Event
 from services.safe_browsing import check_url_saftey
+from core.correlation_engine import check_for_pattern
+from models.keyword_rules import check_keywords
 
 router = APIRouter()
 
@@ -42,12 +44,16 @@ def ingest_url(
     db.commit()
     db.refresh(new_event)
 
+    alert = check_for_pattern(payload.child_id, db)
+
     return {
         "status":"saved!",
         "event_id":new_event.id,
         "type":"url",
         "is_safe": is_safe,
         "risk_label": risk_label,
+        "alert_triggred":alert is not None,
+        "alert":alert
     }
 
 @router.post("/ingest-text")
@@ -55,6 +61,10 @@ def ingest_text(
     payload: TextIngest,
     db: Session = Depends(get_db)
 ):
+
+    keyword_result = check_keywords(payload.text)
+    risk_label = keyword_result["label"] if keyword_result else "safe"
+
     new_event = Event(
         child_id = payload.child_id,
         type = "text",
@@ -66,8 +76,13 @@ def ingest_text(
     db.commit()
     db.refresh(new_event)
 
+    alert = check_for_pattern(payload.child_id, db)
+
     return {
         "status":"saved!",
         "event_id":new_event.id,
-        "type":"text"      
+        "type":"text",
+        "risk_label":risk_label,
+        "alert_triggred":alert is not None,
+        "alert": alert
     }

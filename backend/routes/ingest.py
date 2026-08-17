@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database import get_db, Event
-from services.safe_browsing import check_url_saftey
+from services.safe_browsing import check_url_safety
 from core.correlation_engine import check_for_pattern
 from models.keyword_rules import check_keywords
 
@@ -31,7 +31,7 @@ def ingest_url(
     Extension calls this whenever the child visits a new page.
     We check the URL against Google Safe Browsing, then save the result.
     """
-    is_safe = check_url_saftey(payload.url)
+    is_safe = check_url_safety(payload.url)
     risk_label = "safe" if is_safe else "scam"
     new_event = Event(
         child_id = payload.child_id,

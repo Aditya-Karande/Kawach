@@ -10,7 +10,7 @@ API_KEY = os.getenv("GOOGLE_SAFE_BROWSING_KEY")
 SAFE_BROWSING_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 # function -> url is safe or not
-def check_url_saftey(url:str) -> bool:
+def check_url_safety(url:str) -> bool:
     """
     Returns True if the URL is safe (or unknown), False if Google's
     Safe Browsing API flags it as malicious.

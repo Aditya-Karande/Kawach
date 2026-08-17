@@ -69,7 +69,7 @@ def ingest_text(
         child_id = payload.child_id,
         type = "text",
         content = payload.text,
-        risk_label = None,
+        risk_label = risk_label,
         risk_confidence = None
     )
     db.add(new_event)

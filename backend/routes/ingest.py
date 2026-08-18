@@ -2,6 +2,8 @@
 # for now it just saving whatever it got in "events" table..
 # no LLM, AI yet.. (future phase.)
 
+from typing import Optional, List, Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -13,6 +15,9 @@ from models.keyword_rules import check_keywords
 
 router = APIRouter()
 
+# default child-id
+DEFAULT_CHILD_ID = "child_001"
+
 # schemas
 class URLIngest(BaseModel):
     child_id: str
@@ -21,6 +26,16 @@ class URLIngest(BaseModel):
 class TextIngest(BaseModel):
     child_id: str
     text: str
+
+class ExtensionEvent(BaseModel):
+    enventID: str
+    eventType: str
+    timestamp: str
+    data: dict = {}
+
+class EventBatch(BaseModel):
+    child_id: Optional[str] = None
+    events: List[ExtensionEvent]
 
 @router.post("/ingest-url")
 def ingest_url(
@@ -86,3 +101,60 @@ def ingest_text(
         "alert_triggred":alert is not None,
         "alert": alert
     }
+
+@router.post("/api/events")
+def ingest_events(
+    payload: EventBatch,
+    db: Session = Depends(get_db)
+):
+    # endpoint for browser extension
+    child_id = payload.child_id or DEFAULT_CHILD_ID
+    saved_ids = []
+
+    for event in payload.events:
+        data: dict[str, Any] = event.data or {}
+        risk_label = "safe"
+        content = ""
+
+        if event.eventType in ("page_visit","file_download"):
+            """
+            urlMode defaults to "domain" in the extension for privacy,so a full URL may not be present. We only call Safe Browsing when we actually have one; otherwise we just log the domain.
+            """
+            url = data.get("url") or data.get("sourceUrl") or ""
+            content = url or data.get("domain","")
+            if url:
+                is_safe = check_url_safety(url)
+                risk_label - "safe" if is_safe else "scam"
+
+            elif event.eventType in ("search","from_submission"):
+                content = data.get("query") or data.get("text") or data.get("value") or str(data)
+                keyword_result = check_keywords(content)
+                risk_label = keyword_result["label"] if keyword_result else "safe"
+
+            else:
+            # file_upload, page_metadata, etc. — log-only for now, no
+            # classifier/keyword check applies to these event types.
+                content = str(data)
+
+            new_event = Event(
+                child_id = child_id,
+                type = event.eventType,
+                content = content,
+                risk_label = risk_label,
+                risk_confidence = None
+            )
+            db.add(new_event)
+            db.commit()
+            db.refresh(new_event)
+            saved_ids.append(new_event.id)
+
+        alert = check_for_pattern(child_id, db)
+
+        return {
+            "status":"saved!",
+            "child_id":child_id,
+            "received":len(payload.events),
+            "event_ids":saved_ids,
+            "alert_triggred":alert is not None,
+            "alert":alert
+        }

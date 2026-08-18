@@ -135,37 +135,37 @@ def ingest_events(
             content = url or data.get("domain","")
             if url:
                 is_safe = check_url_safety(url)
-                risk_label - "safe" if is_safe else "scam"
+                risk_label = "safe" if is_safe else "scam"
 
-            elif event.eventType in ("search","from_submission"):
-                content = data.get("query") or data.get("text") or data.get("value") or str(data)
-                keyword_result = check_keywords(content)
-                risk_label = keyword_result["label"] if keyword_result else "safe"
+        elif event.eventType in ("search","from_submission"):
+            content = data.get("query") or data.get("text") or data.get("value") or str(data)
+            keyword_result = check_keywords(content)
+            risk_label = keyword_result["label"] if keyword_result else "safe"
 
-            else:
-            # file_upload, page_metadata, etc. — log-only for now, no
-            # classifier/keyword check applies to these event types.
-                content = str(data)
+        else:
+        # file_upload, page_metadata, etc. — log-only for now, no
+        # classifier/keyword check applies to these event types.
+            content = str(data)
 
-            new_event = Event(
-                child_id = child_id,
-                type = event.eventType,
-                content = content,
-                risk_label = risk_label,
-                risk_confidence = None
-            )
-            db.add(new_event)
-            db.commit()
-            db.refresh(new_event)
-            saved_ids.append(new_event.id)
+        new_event = Event(
+            child_id = child_id,
+            type = event.eventType,
+            content = content,
+            risk_label = risk_label,
+            risk_confidence = None
+        )
+        db.add(new_event)
+        db.commit()
+        db.refresh(new_event)
+        saved_ids.append(new_event.id)
 
-        alert = check_for_pattern(child_id, db)
+    alert = check_for_pattern(child_id, db)
 
-        return {
-            "status":"saved!",
-            "child_id":child_id,
-            "received":len(payload.events),
-            "event_ids":saved_ids,
-            "alert_triggred":alert is not None,
-            "alert":alert
-        }
+    return {
+        "status":"saved!",
+        "child_id":child_id,
+        "received":len(payload.events),
+        "event_ids":saved_ids,
+        "alert_triggred":alert is not None,
+        "alert":alert
+    }

@@ -70,8 +70,6 @@ Respond with ONLY valid JSON in this exact format, nothing else:
 
     except Exception as e:
         print(f"WARNING: LLM call failed ({e}) — using fallback explanation")
-        print(f"ERROR: {e}")
-        print(response.text)
         return _fallback_result(risky_events)
     
 def _fallback_result(risky_events:list) -> dict:

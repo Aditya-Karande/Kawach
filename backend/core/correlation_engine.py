@@ -77,7 +77,9 @@ def _check_window(
         return None
 
     explanation = LLM_result["explanation"]
-    risk_level = "high" if len(risky_events) >= threshold + 2 else "medium"
+    if pattern_type == "long_term":
+        explanation += " (long-term pattern)"
+    risk_level = LLM_result["risk_level"]
 
     new_alert = Alert(
         child_id = child_id,

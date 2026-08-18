@@ -12,6 +12,7 @@ from database import get_db, Event
 from services.safe_browsing import check_url_safety
 from core.correlation_engine import check_for_pattern
 from models.keyword_rules import check_keywords
+from models.predict import predict_risk
 
 router = APIRouter()
 
@@ -78,14 +79,24 @@ def ingest_text(
 ):
 
     keyword_result = check_keywords(payload.text)
-    risk_label = keyword_result["label"] if keyword_result else "safe"
+
+    if keyword_result:
+        # Exact known red-flag phrase found -> treat as a high-confidence
+        # override and skip the ML classifier entirely.
+        risk_label = keyword_result["label"]
+        risk_confidence = None
+    else:
+        # No keyword match -> fall back to the ML classifier's judgment.
+        ml_result = predict_risk(payload.text)
+        risk_label = ml_result["label"]
+        risk_confidence = ml_result["confidence"]
 
     new_event = Event(
         child_id = payload.child_id,
         type = "text",
         content = payload.text,
         risk_label = risk_label,
-        risk_confidence = None
+        risk_confidence = risk_confidence
     )
     db.add(new_event)
     db.commit()

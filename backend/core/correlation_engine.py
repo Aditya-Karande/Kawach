@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from database import Event, Alert
+from services.llm_report import analyze_and_explain
 
 # Short term window setting
 SHORT_WINDOW_MINUTES = 20
@@ -64,7 +65,18 @@ def _check_window(
     if len(risky_events) < threshold:
         return None
 
-    explanation = build_simple_explanation(risky_events,pattern_type,window)
+    """
+    Call the LLM ONLY here — at alert-time, not per-message.
+    It judges genuine intent (not just keyword presence) and writes the explanation, both in one call.
+    """
+    LLM_result = analyze_and_explain(risky_events)
+
+    if not LLM_result["is_genuine_concern"]:
+        # LLM judged this as a false positive (e.g. words matched but context was harmless) — don't create an alert, don't bother the parent.
+        print(f"LLM judged this cluster as a false positive for child {child_id}, no alert created.")
+        return None
+
+    explanation = LLM_result["explanation"]
     risk_level = "high" if len(risky_events) >= threshold + 2 else "medium"
 
     new_alert = Alert(
@@ -115,29 +127,30 @@ def _check_long_term(
         pattern_type="long_term"
     )
 
-def build_simple_explanation(
-        risky_events: list[Event],
-        pattern_type: str,
-        window:timedelta
-) -> str:
-    """
-    Builds a plain-English summary of what was flagged, without any LLM.
-    """
-    label_counts: dict[str,int] = {}
-    for event in risky_events:
-        label_counts[event.risk_label] = label_counts.get(event.risk_label,0) + 1
 
-    parts = []
-    for label,count in label_counts.items():
-        noun = "event" if count == 1 else "events"
-        parts.append(f"{count} '{label}' {noun}")
+# def build_simple_explanation(
+#         risky_events: list[Event],
+#         pattern_type: str,
+#         window:timedelta
+# ) -> str:
+#     """
+#     Builds a plain-English summary of what was flagged, without any LLM.
+#     """
+#     label_counts: dict[str,int] = {}
+#     for event in risky_events:
+#         label_counts[event.risk_label] = label_counts.get(event.risk_label,0) + 1
 
-    summary = ", ".join(parts)
+#     parts = []
+#     for label,count in label_counts.items():
+#         noun = "event" if count == 1 else "events"
+#         parts.append(f"{count} '{label}' {noun}")
 
-    if pattern_type == "long_term":
-        timeframe_desc = f"spread across the last {window.days} days (long-term pattern)"
-    else:
-        minutes = int(window.total_seconds() // 60)
-        timeframe_desc = f"within the last {minutes} minutes." 
+#     summary = ", ".join(parts)
 
-    return f"{len(risky_events)} concerning signals detected: {summary}, {timeframe_desc}."
+#     if pattern_type == "long_term":
+#         timeframe_desc = f"spread across the last {window.days} days (long-term pattern)"
+#     else:
+#         minutes = int(window.total_seconds() // 60)
+#         timeframe_desc = f"within the last {minutes} minutes." 
+
+#     return f"{len(risky_events)} concerning signals detected: {summary}, {timeframe_desc}."

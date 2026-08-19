@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Kawach Browser Activity Monitor",
+  "version": "1.0.0",
+  "description": "Consent-based browser activity monitoring with upload, download, search, visit and page metadata events.",
+  "permissions": ["storage", "tabs", "webNavigation", "downloads", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Kawach",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_page": "src/options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {}
+}

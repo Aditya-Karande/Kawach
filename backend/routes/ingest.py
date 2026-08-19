@@ -29,7 +29,7 @@ class TextIngest(BaseModel):
     text: str
 
 class ExtensionEvent(BaseModel):
-    enventID: str
+    eventId: str
     eventType: str
     timestamp: str
     data: dict = {}
@@ -137,7 +137,7 @@ def ingest_events(
                 is_safe = check_url_safety(url)
                 risk_label = "safe" if is_safe else "scam"
 
-        elif event.eventType in ("search","from_submission"):
+        elif event.eventType in ("search","form_submission"):
             content = data.get("query") or data.get("text") or data.get("value") or str(data)
             keyword_result = check_keywords(content)
             risk_label = keyword_result["label"] if keyword_result else "safe"

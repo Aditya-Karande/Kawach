@@ -3,115 +3,110 @@ from sqlalchemy.orm import Session
 
 from database import Event, Alert
 from services.llm_report import analyze_and_explain
+from core.scoring import tier_for_score
 
-# Short term window setting
-SHORT_WINDOW_MINUTES = 20
-SHORT_TERM_THRESHOLD = 2
+# Rolling window the score is summed over, scoped by session_id per spec
+# Section 5 (not just child_id — a new session starts a fresh score).
+WINDOW_MINUTES = 30
 
-# Long term window setting
-LONG_WINDOW_DAYS = 7
-LONG_TERM_THRESHOLD = 3
 
 def check_for_pattern(
         child_id: str,
-        db: Session
-) -> dict | None:
-    """
-    Runs BOTH the short-term and long-term checks for this child.
-    Returns the short-term alert if one was created/updated (since that's
-    the more time-sensitive/urgent one to surface immediately), otherwise
-    returns the long-term one, otherwise None.
-    """
-    short_term_alert = _check_window(
-        child_id=child_id,
-        db=db,
-        window=timedelta(minutes=SHORT_WINDOW_MINUTES),
-        threshold=SHORT_TERM_THRESHOLD,
-        pattern_type="short_term"
-    )
-
-    long_term_alert = _check_window(
-        child_id=child_id,
-        db=db,
-        window=timedelta(days=LONG_WINDOW_DAYS),
-        threshold=LONG_TERM_THRESHOLD,
-        pattern_type="long_term"
-    )
-
-    return short_term_alert or long_term_alert
-
-
-def _check_window(
-        child_id: str,
+        session_id: str | None,
         db: Session,
-        window: timedelta,
-        threshold: int,
-        pattern_type: str,
 ) -> dict | None:
     """
-    Shared logic: look at events for this child within `window`, and if
-    `threshold` or more are risky, produce ONE alert for that pattern.
+    Sums Event.weight over the rolling window for this child+session and
+    routes the total into a tier:
 
-    Key fix: if an alert for this same child + pattern_type is already
-    "open" (created within the current window), we UPDATE it in place
-    with a fresh explanation covering ALL the risky events currently in
-    the window, instead of inserting a new row. That's what stops the
-    parent dashboard from getting flooded with a new near-duplicate alert
-    every time one more risky event trickles in — they get a single,
-    growing explanation instead.
+      tier None (score 0)   -> nothing to do
+      tier 1  (score 1-2)   -> already logged as a normal Event row, no
+                                further action, no one is told
+      tier 2  (score 3-5)   -> in-browser nudge shown to the child; still
+                                just logged, no Alert row, no LLM call
+      tier 3  (score 6+)    -> LLM explanation generated, Alert row
+                                created/updated, parent gets pushed a
+                                notification (handled by the caller in
+                                routes/ingest.py + services/email.py)
+
+    A confirmed Safe Browsing match bypasses this function entirely and
+    blocks instantly — that happens upstream in ingest.py and never
+    reaches here.
+
+    Returns a dict describing the outcome (for the API response) or None
+    if nothing scored above 0 in the window.
     """
-    cutoff_time = datetime.now(timezone.utc) - window
+    cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES)
 
-    recent_events = (
+    query = (
         db.query(Event)
         .filter(Event.child_id == child_id)
         .filter(Event.timestamp >= cutoff_time)
-        .order_by(Event.timestamp.desc())
-        .all()
     )
+    if session_id:
+        query = query.filter(Event.session_id == session_id)
 
-    risky_events = [e for e in recent_events if e.risk_label and e.risk_label != "safe"]
+    recent_events = query.order_by(Event.timestamp.desc()).all()
+    scored_events = [e for e in recent_events if e.weight]
 
-    if len(risky_events) < threshold:
+    score = sum(e.weight for e in scored_events)
+    tier = tier_for_score(score)
+
+    if tier is None:
         return None
 
-    # Is there already an open alert for this exact pattern? "Open" means
-    # it was created/updated within this same window, i.e. it's still
-    # describing the current situation rather than a resolved past one.
+    if tier in (1, 2):
+        # Tier 1: log silently, nobody is told.
+        # Tier 2: in-browser nudge shown to the child, logged — but per
+        # spec this is NOT sent to the parent, so no Alert row is created,
+        # and there's no LLM call either. The events are already
+        # persisted by the caller before check_for_pattern runs, so
+        # there's nothing further to write here.
+        return {
+            "tier": tier,
+            "score": score,
+            "child_id": child_id,
+            "session_id": session_id,
+            "nudge": tier == 2,
+            "alert_id": None,
+            "ai_explanation": None,
+        }
+
+    # --- tier 3: the only tier that calls the LLM and creates an Alert ---
+
     existing_alert = (
         db.query(Alert)
         .filter(Alert.child_id == child_id)
-        .filter(Alert.pattern_type == pattern_type)
+        .filter(Alert.status == "new")
         .filter(Alert.updated_at >= cutoff_time)
         .order_by(Alert.updated_at.desc())
         .first()
     )
 
-    # No new risky events since the existing alert was last updated ->
-    # nothing has changed, don't bother re-calling the LLM or bumping it.
-    if existing_alert is not None and existing_alert.event_count >= len(risky_events):
+    contributing_ids = [e.id for e in scored_events]
+
+    # No new contributing events since the existing open alert was last
+    # updated -> nothing has changed, don't bother re-calling the LLM.
+    if existing_alert is not None and set(existing_alert.contributing_signal_ids or []) == set(contributing_ids):
         return None
 
-    """
-    Call the LLM ONLY here — at alert-time, not per-message.
-    It judges genuine intent (not just keyword presence) and writes the explanation, both in one call.
-    """
-    LLM_result = analyze_and_explain(risky_events)
+    llm_result = analyze_and_explain(scored_events)
 
-    if not LLM_result["is_genuine_concern"]:
-        # LLM judged this as a false positive (e.g. words matched but context was harmless) — don't create an alert, don't bother the parent.
+    if not llm_result["is_genuine_concern"]:
+        # LLM judged this as a false positive (e.g. words matched but
+        # context was harmless) — don't create/update an alert, don't
+        # bother the parent.
         print(f"LLM judged this cluster as a false positive for child {child_id}, no alert created.")
         return None
 
-    explanation = LLM_result["explanation"]
-    if pattern_type == "long_term":
-        explanation += " (long-term pattern)"
-    risk_level = LLM_result["risk_level"]
+    ai_explanation = llm_result["ai_explanation"]
 
     if existing_alert is not None:
-        existing_alert.explanation = explanation
-        existing_alert.risk_level = risk_level
-        existing_alert.event_count = len(risky_events)
+        existing_alert.score = score
+        existing_alert.tier = tier
+        existing_alert.contributing_signal_ids = contributing_ids
+        existing_alert.ai_explanation = ai_explanation
+        existing_alert.event_count = len(contributing_ids)
         existing_alert.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(existing_alert)
@@ -119,20 +114,23 @@ def _check_window(
     else:
         alert_row = Alert(
             child_id=child_id,
-            explanation=explanation,
-            risk_level=risk_level,
-            pattern_type=pattern_type,
-            event_count=len(risky_events),
+            tier=tier,
+            score=score,
+            contributing_signal_ids=contributing_ids,
+            ai_explanation=ai_explanation,
+            status="new",
+            event_count=len(contributing_ids),
         )
         db.add(alert_row)
         db.commit()
         db.refresh(alert_row)
 
     return {
-        "alert_id": alert_row.id,
+        "tier": tier,
+        "score": score,
         "child_id": child_id,
-        "risk_level": risk_level,
-        "explanation": explanation,
-        "triggred_by_event_count": len(risky_events),
-        "pattern_type": pattern_type
+        "session_id": session_id,
+        "nudge": False,
+        "alert_id": alert_row.id,
+        "ai_explanation": ai_explanation,
     }

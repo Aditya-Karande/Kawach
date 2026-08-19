@@ -1,4 +1,4 @@
-fastapi 
+fastapi
 uvicorn
 sqlalchemy
 python-dotenv
@@ -6,3 +6,9 @@ requests
 scikit-learn
 joblib
 numpy
+pandas
+streamlit
+pydantic[email]
+passlib[bcrypt]
+python-jose[cryptography]
+apscheduler

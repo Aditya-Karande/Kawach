@@ -5,11 +5,11 @@ import { shouldIgnore, hostnameFromUrl } from '../privacy/domain-filter.js';
 import { addEvent, getEvents, getPendingEvents, clearAllEvents, removePending } from '../storage/store.js';
 import { HttpBackendAdapter } from '../transport/backend-adapter.js';
 import { detectSearch } from '../collectors/search-collector.js';
-import { DEFAULT_SETTINGS } from '../privacy/defaults.js';
 
 chrome.runtime.onInstalled.addListener(async () => {
   const s = await chrome.storage.local.get('settings');
   if (!s.settings) {
+    const { DEFAULT_SETTINGS } = await import('../privacy/defaults.js');
     await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   }
 });

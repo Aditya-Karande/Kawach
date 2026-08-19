@@ -38,8 +38,14 @@ class Event(Base):
 class Alert(Base):
     """
     Table: Alert
-    One row per combined alert created by system
-    (for parent dashboard)
+    One row per ONGOING pattern of concern for a child (for parent dashboard).
+
+    Instead of inserting a brand-new row every time new risky events keep
+    matching the same pattern, the correlation engine UPDATES this row in
+    place (new explanation covering everything, refreshed timestamp) while
+    the pattern is still "current". This is what keeps the parent looking
+    at one clear, evolving explanation instead of a flood of near-duplicate
+    alerts for the same underlying situation.
     """
     __tablename__ = "alert"
 
@@ -47,11 +53,32 @@ class Alert(Base):
     child_id = Column(String, index=True, nullable=False)
     explanation = Column(String, nullable=False)
     risk_level = Column(String, nullable=False)
+    pattern_type = Column(String, nullable=False, default="short_term")  # "short_term" or "long_term"
+    event_count = Column(Integer, nullable=False, default=0)  # how many risky events this alert currently covers
     timestamp = Column(DateTime, default= lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime, default= lambda: datetime.now(timezone.utc), onupdate= lambda: datetime.now(timezone.utc), index=True)
 
 # function to create tables.
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_add_missing_columns()
+
+def _migrate_add_missing_columns():
+    """
+    Lightweight migration for people (like us, mid-dev) who already have a
+    database.db from before these columns existed. SQLite supports simple
+    ADD COLUMN, so we just check what's there and patch it up instead of
+    forcing everyone to delete their test database.
+    """
+    with engine.connect() as conn:
+        existing_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(alert)")}
+        if "pattern_type" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE alert ADD COLUMN pattern_type VARCHAR DEFAULT 'short_term'")
+        if "event_count" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE alert ADD COLUMN event_count INTEGER DEFAULT 0")
+        if "updated_at" not in existing_cols:
+            conn.exec_driver_sql("ALTER TABLE alert ADD COLUMN updated_at DATETIME")
+        conn.commit()
 
 # helper to get a db session
 def get_db():

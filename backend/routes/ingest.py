@@ -1,6 +1,10 @@
 # Endpoint used by browser extension to send data to backend.
-# for now it just saving whatever it got in "events" table..
-# no LLM, AI yet.. (future phase.)
+# We classify every incoming event, but we only WRITE a row to the
+# database for events that are actually risk-relevant. Routine "safe"
+# browsing (every page visit, every search, every metadata ping) is
+# classified in-memory and then discarded instead of being persisted —
+# otherwise the events table fills up with thousands of rows of normal
+# activity for every few minutes of browsing.
 
 from typing import Optional, List, Any
 
@@ -18,6 +22,11 @@ router = APIRouter()
 
 # default child-id
 DEFAULT_CHILD_ID = "child_001"
+
+# Event types that are pure bookkeeping/context and never carry a risk
+# classification of their own (e.g. page_metadata just records a title).
+# These are never worth a row on their own.
+NON_ACTIONABLE_EVENT_TYPES = {"page_metadata"}
 
 # schemas
 class URLIngest(BaseModel):
@@ -45,10 +54,24 @@ def ingest_url(
 ):
     """
     Extension calls this whenever the child visits a new page.
-    We check the URL against Google Safe Browsing, then save the result.
+    We check the URL against Google Safe Browsing. Only flagged (unsafe)
+    URLs get written to the database — a "safe" result is not logged, so
+    normal browsing doesn't pile up in the events table.
     """
     is_safe = check_url_safety(payload.url)
     risk_label = "safe" if is_safe else "scam"
+
+    if risk_label == "safe":
+        return {
+            "status": "checked, not saved (safe)",
+            "event_id": None,
+            "type": "url",
+            "is_safe": is_safe,
+            "risk_label": risk_label,
+            "alert_triggred": False,
+            "alert": None
+        }
+
     new_event = Event(
         child_id = payload.child_id,
         type = "url",
@@ -91,6 +114,17 @@ def ingest_text(
         risk_label = ml_result["label"]
         risk_confidence = ml_result["confidence"]
 
+    if risk_label == "safe":
+        # Nothing concerning -> classify and move on, don't log it.
+        return {
+            "status":"checked, not saved (safe)",
+            "event_id":None,
+            "type":"text",
+            "risk_label":risk_label,
+            "alert_triggred":False,
+            "alert":None
+        }
+
     new_event = Event(
         child_id = payload.child_id,
         type = "text",
@@ -121,6 +155,7 @@ def ingest_events(
     # endpoint for browser extension
     child_id = payload.child_id or DEFAULT_CHILD_ID
     saved_ids = []
+    skipped_count = 0
 
     for event in payload.events:
         data: dict[str, Any] = event.data or {}
@@ -142,10 +177,24 @@ def ingest_events(
             keyword_result = check_keywords(content)
             risk_label = keyword_result["label"] if keyword_result else "safe"
 
+        elif event.eventType in NON_ACTIONABLE_EVENT_TYPES:
+            # page_metadata etc. — nothing to classify, nothing to save.
+            skipped_count += 1
+            continue
+
         else:
-        # file_upload, page_metadata, etc. — log-only for now, no
-        # classifier/keyword check applies to these event types.
+            # file_upload and any other type we don't have a classifier
+            # for yet — we don't have a way to judge risk on these, so
+            # they stay "safe" and get skipped below like everything else.
+            # (If you want uploads logged unconditionally regardless of
+            # risk, that's a deliberate product decision — say so and
+            # we'll special-case event.eventType == "file_upload" here.)
             content = str(data)
+
+        if risk_label == "safe":
+            # Routine, non-concerning activity — classified but not stored.
+            skipped_count += 1
+            continue
 
         new_event = Event(
             child_id = child_id,
@@ -165,6 +214,8 @@ def ingest_events(
         "status":"saved!",
         "child_id":child_id,
         "received":len(payload.events),
+        "saved":len(saved_ids),
+        "skipped_safe":skipped_count,
         "event_ids":saved_ids,
         "alert_triggred":alert is not None,
         "alert":alert

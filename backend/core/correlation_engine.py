@@ -12,20 +12,15 @@ SHORT_TERM_THRESHOLD = 2
 LONG_WINDOW_DAYS = 7
 LONG_TERM_THRESHOLD = 3
 
-# Don't create a new LONG-TERM alert for the same child more than once
-# within this cooldown period, even if the pattern still holds — otherwise
-# every single new event would re-trigger a duplicate alert.
-LONG_TERM_ALERT_COOLDOWN_HOURS = 24
-
 def check_for_pattern(
         child_id: str,
         db: Session
 ) -> dict | None:
     """
     Runs BOTH the short-term and long-term checks for this child.
-    Returns the short-term alert if one was created (since that's the
-    more time-sensitive/urgent one to surface immediately), otherwise
-    returns the long-term alert if one was created, otherwise None.
+    Returns the short-term alert if one was created/updated (since that's
+    the more time-sensitive/urgent one to surface immediately), otherwise
+    returns the long-term one, otherwise None.
     """
     short_term_alert = _check_window(
         child_id=child_id,
@@ -35,9 +30,16 @@ def check_for_pattern(
         pattern_type="short_term"
     )
 
-    long_term_alert = _check_long_term(child_id=child_id, db=db)
+    long_term_alert = _check_window(
+        child_id=child_id,
+        db=db,
+        window=timedelta(days=LONG_WINDOW_DAYS),
+        threshold=LONG_TERM_THRESHOLD,
+        pattern_type="long_term"
+    )
 
     return short_term_alert or long_term_alert
+
 
 def _check_window(
         child_id: str,
@@ -47,8 +49,16 @@ def _check_window(
         pattern_type: str,
 ) -> dict | None:
     """
-    Shared logic: look at events for this child within `window`,
-    and if `threshold` or more are risky, create a combined alert.
+    Shared logic: look at events for this child within `window`, and if
+    `threshold` or more are risky, produce ONE alert for that pattern.
+
+    Key fix: if an alert for this same child + pattern_type is already
+    "open" (created within the current window), we UPDATE it in place
+    with a fresh explanation covering ALL the risky events currently in
+    the window, instead of inserting a new row. That's what stops the
+    parent dashboard from getting flooded with a new near-duplicate alert
+    every time one more risky event trickles in — they get a single,
+    growing explanation instead.
     """
     cutoff_time = datetime.now(timezone.utc) - window
 
@@ -63,6 +73,23 @@ def _check_window(
     risky_events = [e for e in recent_events if e.risk_label and e.risk_label != "safe"]
 
     if len(risky_events) < threshold:
+        return None
+
+    # Is there already an open alert for this exact pattern? "Open" means
+    # it was created/updated within this same window, i.e. it's still
+    # describing the current situation rather than a resolved past one.
+    existing_alert = (
+        db.query(Alert)
+        .filter(Alert.child_id == child_id)
+        .filter(Alert.pattern_type == pattern_type)
+        .filter(Alert.updated_at >= cutoff_time)
+        .order_by(Alert.updated_at.desc())
+        .first()
+    )
+
+    # No new risky events since the existing alert was last updated ->
+    # nothing has changed, don't bother re-calling the LLM or bumping it.
+    if existing_alert is not None and existing_alert.event_count >= len(risky_events):
         return None
 
     """
@@ -81,78 +108,31 @@ def _check_window(
         explanation += " (long-term pattern)"
     risk_level = LLM_result["risk_level"]
 
-    new_alert = Alert(
-        child_id = child_id,
-        explanation = explanation,
-        risk_level = risk_level
-    )
-    db.add(new_alert)
-    db.commit()
-    db.refresh(new_alert)
+    if existing_alert is not None:
+        existing_alert.explanation = explanation
+        existing_alert.risk_level = risk_level
+        existing_alert.event_count = len(risky_events)
+        existing_alert.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing_alert)
+        alert_row = existing_alert
+    else:
+        alert_row = Alert(
+            child_id=child_id,
+            explanation=explanation,
+            risk_level=risk_level,
+            pattern_type=pattern_type,
+            event_count=len(risky_events),
+        )
+        db.add(alert_row)
+        db.commit()
+        db.refresh(alert_row)
 
-    return{
-        "alert_id":new_alert.id,
-        "child_id":child_id,
-        "risk_level":risk_level,
-        "explanation":explanation,
-        "triggred_by_event_count":len(risky_events),
-        "pattern_type":pattern_type
+    return {
+        "alert_id": alert_row.id,
+        "child_id": child_id,
+        "risk_level": risk_level,
+        "explanation": explanation,
+        "triggred_by_event_count": len(risky_events),
+        "pattern_type": pattern_type
     }
-
-def _check_long_term(
-        child_id: str,
-        db: Session,
-) -> dict | None:
-    """
-    Long-term check, with a cooldown so we don't spam duplicate alerts
-    for the same slow-building pattern every time a new event comes in.
-    """
-    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(hours=LONG_TERM_ALERT_COOLDOWN_HOURS)
-
-    recent_long_term_alert = (
-        db.query(Alert)
-        .filter(Alert.child_id == child_id)
-        .filter(Alert.explanation.like("%long-term%"))
-        .filter(Alert.timestamp >= cooldown_cutoff)
-        .first()
-    )
-
-    if recent_long_term_alert is not None:
-        # We already alerted the parent about this slow-building pattern recently — don't create a duplicate.
-        return None
-
-    return _check_window(
-        child_id=child_id,
-        db=db,
-        window=timedelta(days=LONG_WINDOW_DAYS),
-        threshold=LONG_TERM_THRESHOLD,
-        pattern_type="long_term"
-    )
-
-
-# def build_simple_explanation(
-#         risky_events: list[Event],
-#         pattern_type: str,
-#         window:timedelta
-# ) -> str:
-#     """
-#     Builds a plain-English summary of what was flagged, without any LLM.
-#     """
-#     label_counts: dict[str,int] = {}
-#     for event in risky_events:
-#         label_counts[event.risk_label] = label_counts.get(event.risk_label,0) + 1
-
-#     parts = []
-#     for label,count in label_counts.items():
-#         noun = "event" if count == 1 else "events"
-#         parts.append(f"{count} '{label}' {noun}")
-
-#     summary = ", ".join(parts)
-
-#     if pattern_type == "long_term":
-#         timeframe_desc = f"spread across the last {window.days} days (long-term pattern)"
-#     else:
-#         minutes = int(window.total_seconds() // 60)
-#         timeframe_desc = f"within the last {minutes} minutes." 
-
-#     return f"{len(risky_events)} concerning signals detected: {summary}, {timeframe_desc}."

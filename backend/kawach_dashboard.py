@@ -289,6 +289,42 @@ else:
 
 
 # -----------------------------
+# Second guardian (spec Section 7.3 — POST/GET /api/guardians)
+# -----------------------------
+st.sidebar.markdown("---")
+st.sidebar.subheader("Second guardian (optional)")
+
+if not st.session_state.token:
+    st.sidebar.caption("Log in above first.")
+elif not all_child_ids:
+    st.sidebar.caption("Create a child first.")
+else:
+    guardian_child_id = st.sidebar.selectbox("Child", all_child_ids, key="guardian_child")
+    guardian_email = st.sidebar.text_input("Guardian email", key="guardian_email_input")
+    if st.sidebar.button("Add guardian", width='stretch'):
+        try:
+            r = requests.post(
+                f"{backend_url}/api/guardians",
+                json={"child_id": guardian_child_id, "email": guardian_email},
+                headers=auth_headers(),
+                timeout=5,
+            )
+            if r.status_code == 201:
+                st.sidebar.success(f"Added {guardian_email} as a second contact for tier-3 alerts.")
+            else:
+                st.sidebar.error(f"Failed: {r.json().get('detail', r.text)}")
+        except Exception as e:
+            st.sidebar.error(f"Couldn't reach backend: {e}")
+
+    try:
+        r = requests.get(f"{backend_url}/api/guardians/{guardian_child_id}", headers=auth_headers(), timeout=5)
+        if r.status_code == 200 and r.json():
+            st.sidebar.caption("Current guardians: " + ", ".join(g["email"] for g in r.json()))
+    except Exception:
+        pass
+
+
+# -----------------------------
 # Main content
 # -----------------------------
 st.title("🛡️ Kawach — Test Dashboard")
@@ -344,6 +380,40 @@ else:
                         st.caption(f"Contributing event IDs: {ids}")
                 except Exception:
                     pass
+
+                # Feedback (spec Section 7.1) — this is what actually
+                # adjusts the child's weight_multiplier via
+                # POST /api/alerts/{id}/feedback. Requires login, since
+                # the endpoint checks the logged-in parent owns this
+                # child. Hidden once an alert already has a verdict so
+                # the multiplier can't be nudged twice for one alert.
+                if alert["status"] == "new":
+                    if not st.session_state.token:
+                        st.caption("Log in to mark this alert reviewed or not a concern.")
+                    else:
+                        fb1, fb2 = st.columns(2)
+
+                        def _send_feedback(alert_id, verdict):
+                            try:
+                                r = requests.post(
+                                    f"{backend_url}/api/alerts/{alert_id}/feedback",
+                                    json={"parent_verdict": verdict},
+                                    headers=auth_headers(),
+                                    timeout=5,
+                                )
+                                if r.status_code == 201:
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed: {r.json().get('detail', r.text)}")
+                            except Exception as e:
+                                st.error(f"Couldn't reach backend: {e}")
+
+                        if fb1.button("✅ Reviewed", key=f"reviewed_{alert['id']}", width='stretch'):
+                            _send_feedback(alert["id"], "reviewed")
+                        if fb2.button("🚫 Not a concern", key=f"dismiss_{alert['id']}", width='stretch'):
+                            _send_feedback(alert["id"], "not_a_concern")
+                else:
+                    st.caption(f"Marked **{alert['status']}** — thanks, this tunes future alerts for this child.")
             with c2:
                 st.caption(format_time_ago(alert["timestamp"]))
                 st.caption(alert["timestamp"])

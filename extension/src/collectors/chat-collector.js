@@ -90,3 +90,71 @@ export function looksLikeSendButton(el) {
   if (!/send/i.test(label)) return null;
   return findNearbyEditable(btn);
 }
+
+// --- Incoming message detection ---
+// Everything above only ever captures what the CHILD types and sends.
+// That misses the highest-signal content in a real grooming/scam
+// conversation — the other party's messages ("what's your real name",
+// "let's talk on a different app") never pass through the child's own
+// input box. This section watches for new message-shaped elements
+// appearing near a chat input and reports their text too, so both
+// sides of a conversation are covered, not just the child's replies.
+//
+// Deliberately scoped, not a whole-page scraper: it only starts once a
+// real chat input has been found on the page, and only observes the
+// smallest scrollable ancestor of that input (a reasonable, generic
+// proxy for "the message list" across most chat UIs) rather than the
+// entire document.
+
+export function findChatInputOnPage() {
+  const candidates = document.querySelectorAll(
+    'textarea, [contenteditable="true"], input[type="text"], input[type="search"]'
+  );
+  for (const el of candidates) {
+    if (looksLikeChatInput(el)) return el;
+  }
+  return null;
+}
+
+function findMessageContainer(inputEl) {
+  let el = inputEl;
+  for (let i = 0; i < 8 && el; i++) {
+    el = el.parentElement;
+    if (!el) break;
+    const style = getComputedStyle(el);
+    const scrollable = /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 40;
+    if (scrollable) return el;
+  }
+  // Couldn't find a plausible message-list container — better to skip
+  // incoming detection on this page than fall back to observing
+  // something as broad as document.body.
+  return null;
+}
+
+const MIN_INCOMING_CHARS = 2;
+const MAX_INCOMING_CHARS = 2000; // longer than this is more likely a re-render than a single message
+
+// Starts watching `inputEl`'s nearest message-list container for newly
+// added elements and reports their text via onMessage(text). Returns
+// the MutationObserver (so the caller can disconnect it later) or null
+// if no plausible container was found.
+export function observeIncomingMessages(inputEl, onMessage) {
+  const container = findMessageContainer(inputEl);
+  if (!container) return null;
+
+  const seen = new WeakSet();
+  const observer = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (!(node instanceof HTMLElement) || seen.has(node)) continue;
+        seen.add(node);
+        const text = (node.innerText ?? node.textContent ?? '').trim();
+        if (text.length < MIN_INCOMING_CHARS || text.length > MAX_INCOMING_CHARS) continue;
+        onMessage(text);
+      }
+    }
+  });
+
+  observer.observe(container, { childList: true, subtree: true });
+  return observer;
+}

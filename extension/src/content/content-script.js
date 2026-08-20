@@ -86,18 +86,37 @@ document.addEventListener('submit', event => {
 // collectors/chat-collector.js for the (imperfect, heuristic) matching
 // logic and its limitations.
 
-import('../collectors/chat-collector.js').then(({ detectChatSend, looksLikeSendButton }) => {
+import('../collectors/chat-collector.js').then(({
+  detectChatSend, looksLikeSendButton, findChatInputOnPage, observeIncomingMessages
+}) => {
   const MAX_CHAT_CHARS = 4000;
+  const RECENT_SENT_TTL_MS = 10000;
 
-  function sendChat(text) {
+  // The child's own outgoing message often re-appears moments later as
+  // a new node in the message list (once the chat UI renders the sent
+  // bubble). Without this, the incoming-message observer below would
+  // report it a second time as if the other party had said it.
+  const recentlySent = new Set();
+  function rememberSent(text) {
+    recentlySent.add(text);
+    setTimeout(() => recentlySent.delete(text), RECENT_SENT_TTL_MS);
+  }
+
+  function sendChat(text, direction = 'outgoing') {
     if (!chatMonitoringEnabled || !monitoringEnabled) return;
     const trimmed = text.slice(0, MAX_CHAT_CHARS);
+    if (direction === 'outgoing') {
+      rememberSent(trimmed);
+    } else if (recentlySent.has(trimmed)) {
+      return; // this is the child's own message echoing back, not a reply from the other party
+    }
     send(makeEvent(EVENT_TYPES.CHAT_MESSAGE, {
       pageUrl: location.href,
       domain: location.hostname,
       pageTitle: document.title,
       text: trimmed,
-      detection: 'chat-input'
+      direction,
+      detection: direction === 'outgoing' ? 'chat-input' : 'chat-incoming'
     }));
   }
 
@@ -105,7 +124,7 @@ import('../collectors/chat-collector.js').then(({ detectChatSend, looksLikeSendB
     if (!chatMonitoringEnabled || !monitoringEnabled) return;
     if (event.key !== 'Enter' || event.shiftKey) return;
     const text = detectChatSend(event.target);
-    if (text) sendChat(text);
+    if (text) sendChat(text, 'outgoing');
   }, true);
 
   document.addEventListener('click', event => {
@@ -113,8 +132,25 @@ import('../collectors/chat-collector.js').then(({ detectChatSend, looksLikeSendB
     const editable = looksLikeSendButton(event.target);
     if (!editable) return;
     const text = (editable.value ?? editable.innerText ?? '').trim();
-    if (text) sendChat(text);
+    if (text) sendChat(text, 'outgoing');
   }, true);
+
+  // Incoming-message detection (see collectors/chat-collector.js for
+  // why this exists — outgoing-only capture misses the other party's
+  // messages entirely). Starts once a chat input is found on the page;
+  // many chat UIs render their input asynchronously, so we retry a
+  // couple of times after load rather than only checking once.
+  let incomingObserverStarted = false;
+  function tryStartIncomingObserver() {
+    if (incomingObserverStarted || !chatMonitoringEnabled || !monitoringEnabled) return;
+    const input = findChatInputOnPage();
+    if (!input) return;
+    const observer = observeIncomingMessages(input, text => sendChat(text, 'incoming'));
+    if (observer) incomingObserverStarted = true;
+  }
+  tryStartIncomingObserver();
+  setTimeout(tryStartIncomingObserver, 2000);
+  setTimeout(tryStartIncomingObserver, 6000);
 }).catch(() => {});
 
 // --- visible page text (off by default — see options: "Visible text analysis") ---

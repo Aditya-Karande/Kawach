@@ -4,7 +4,38 @@ The extension is backend-agnostic. The browser-side pipeline is:
 
 `Browser signal -> consent/privacy filter -> event normalization -> local queue -> adapter`
 
-The backend team only needs to implement an endpoint that accepts a JSON object shaped like:
+## Primary endpoint: `POST /api/signals`
+
+As of the v2 backend spec, the one true endpoint the extension should call
+going forward is `POST /api/signals`, one call per signal:
+
+```json
+{
+  "child_id": "string",
+  "session_id": "string",
+  "signal_type": "search_query | url_visit | page_text | chat_text",
+  "content": "string",
+  "url": "string | null",
+  "timestamp": "ISO 8601 string"
+}
+```
+
+`session_id` matters: the backend now scores signals as a weighted total
+per browsing *session*, not just per child, so the adapter should generate
+and persist a session id (e.g. reset on browser restart or after a period
+of inactivity) and send it with every signal.
+
+The extension should also start sending `chat_text` signals for chat
+messages on monitored pages/apps — this wasn't previously covered by any
+event type below.
+
+`GET /api/monitoring/status/{child_id}` (no auth, read-only) should be
+polled/checked before sending any data, same as before.
+
+## Legacy batch endpoint (still supported during migration)
+
+The backend also still accepts the older batch shape below, for
+backward compatibility while the extension migrates to `/api/signals`:
 
 ```json
 {
@@ -33,12 +64,21 @@ Supported event types:
 
 - `page_visit`
 - `search`
+- `chat_message` (new — routed to the `chat_text` signal type)
 - `file_upload`
 - `form_submission`
 - `file_download`
 - `page_metadata`
 
-The frontend intentionally does not implement authentication. Add the team's authentication headers/token mechanism inside `src/transport/backend-adapter.js` when the backend is ready.
+The frontend intentionally does not implement authentication for the
+signal-ingest endpoints above (`/api/signals`, `/api/events`) — those stay
+open by design since the extension has no parent login of its own. Parent-
+facing endpoints (`/api/monitoring/toggle`, `/api/alerts/*`, `/api/guardians`,
+`/api/children`) now require a parent bearer token from `POST /api/auth/login`;
+that's a dashboard concern, not something this extension needs to send. Add
+the team's authentication headers/token mechanism inside
+`src/transport/backend-adapter.js` only if/when the extension itself needs to
+call an authenticated endpoint (e.g. pairing via `POST /api/auth/pair`).
 
 ## Important upload limitation
 

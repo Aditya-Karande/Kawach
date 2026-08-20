@@ -1,6 +1,7 @@
 const MAX_STRING = 5000;
 const ALLOWED_TYPES = new Set([
-  'page_visit','search','file_upload','form_submission','file_download','page_metadata'
+  'page_visit','search','file_upload','form_submission','file_download','page_metadata',
+  'chat_message','page_text'
 ]);
 
 export function validateEvent(event) {

@@ -10,6 +10,7 @@ async function refresh(){
   document.getElementById('downloads').textContent=count(ev,'file_download');
   document.getElementById('searches').textContent=count(ev,'search');
   document.getElementById('visits').textContent=count(ev,'page_visit');
+  document.getElementById('chats').textContent=count(ev,'chat_message');
   document.getElementById('pending').textContent=r.pendingCount;
   document.getElementById('backend').textContent=s.backendEnabled?(s.backendBaseUrl?'Configured':'Enabled, no URL'):'Not connected';
 }

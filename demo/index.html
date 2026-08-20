@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SafeSignal — Detection Demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <div class="kicker">SAFESIGNAL / KAWACH</div>
+    <h1>Detection pipeline demo</h1>
+    <p>
+      Plays a <strong>scripted, fictional</strong> conversation through the real backend
+      (<code>POST /api/signals</code>) so you can see scoring, tier escalation, and the
+      AI-generated parent alert happen live — no real chat app scraping involved.
+    </p>
+  </header>
+
+  <section class="config">
+    <label>Backend URL
+      <input id="backendUrl" placeholder="http://localhost:8000">
+    </label>
+    <label>Child ID
+      <input id="childId" placeholder="demo_child_001" value="demo_child_001">
+    </label>
+    <label>Scenario
+      <select id="scenario"></select>
+    </label>
+    <div class="actions">
+      <button id="resetSession" class="secondary">New session</button>
+      <button id="stepBtn" class="primary">Step ▶</button>
+      <button id="autoplayBtn" class="primary">Auto-play ▶▶</button>
+      <button id="restartBtn" class="secondary">Restart scenario</button>
+    </div>
+    <div class="session-info">Session: <span id="sessionId">—</span></div>
+  </section>
+
+  <section class="board">
+    <div class="chat-pane">
+      <div class="chat-header">Simulated conversation (fictional — not a real account)</div>
+      <div id="chatLog" class="chat-log"></div>
+    </div>
+
+    <div class="signal-pane">
+      <div class="chat-header">What the backend saw</div>
+      <div id="scoreBar" class="score-bar">
+        <div class="score-fill" id="scoreFill"></div>
+      </div>
+      <div class="score-readout">
+        <span>Score: <strong id="scoreVal">0</strong></span>
+        <span id="tierBadge" class="tier-badge tier-0">No tier</span>
+      </div>
+      <div id="signalLog" class="signal-log"></div>
+      <div id="alertCard" class="alert-card hidden"></div>
+    </div>
+  </section>
+
+  <footer>
+    This tool sends fictional, scripted messages to your own backend for demo/testing
+    purposes only. It does not read, scrape, or connect to any real chat app or account.
+  </footer>
+</main>
+<script src="scenarios.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

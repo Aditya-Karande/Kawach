@@ -1,9 +1,24 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
 
 from routes import ingest, monitoring, auth, alerts, guardians, children
 
 app = FastAPI(title="Kawach")
+
+# CORS: the demo page (demo/index.html) and any future dashboard call
+# this API from a different origin via plain fetch(), which the browser
+# blocks by default without these headers. allow_origins=["*"] is fine
+# for local development / the demo; lock this down to your actual
+# dashboard's origin(s) before deploying anywhere real, since "*" plus
+# credentialed requests is not something you want in production.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 init_db()
 

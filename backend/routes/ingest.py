@@ -19,8 +19,7 @@ from pydantic import BaseModel
 from database import get_db, Event, Child
 from services.safe_browsing import check_url_safety
 from core.correlation_engine import check_for_pattern
-from core.scoring import get_weight
-from models.keyword_rules import check_keywords
+from models.keyword_rules import check_keywords, check_url_risk
 from models.predict import predict_risk
 
 router = APIRouter()
@@ -64,7 +63,7 @@ class EventBatch(BaseModel):
 
 
 class SignalIngest(BaseModel):
-    """payload shape for POST /api/signals."""
+    """Spec Section 4.1's exact payload shape for POST /api/signals."""
     child_id: str
     session_id: str
     signal_type: str  # search_query | url_visit | page_text | chat_text
@@ -108,10 +107,19 @@ def _classify_signal(signal_type: str, content: str, child_multiplier: float) ->
         confidence = None
         base_weight = keyword_result["weight"]
     else:
-        ml_result = predict_risk(content, signal_type=signal_type)
-        label = ml_result["label"]
-        confidence = ml_result["confidence"]
-        base_weight = ml_result["weight"]
+        try:
+            ml_result = predict_risk(content, signal_type=signal_type)
+            label = ml_result["label"]
+            confidence = ml_result["confidence"]
+            base_weight = ml_result["weight"]
+        except Exception as e:
+            # Model file missing/corrupt, or any other classifier failure —
+            # fail open to "safe" rather than 500ing the whole ingest
+            # request. Keyword rules already caught the highest-confidence
+            # cases above; losing the ML fallback for one event shouldn't
+            # take down monitoring entirely.
+            print(f"WARNING: predict_risk failed ({e}), treating as safe")
+            label, confidence, base_weight = "safe", 0.0, 0
 
     weight = round(base_weight * child_multiplier)
 
@@ -199,12 +207,18 @@ def ingest_signal(
                 "risk_label": "confirmed_scam",
             }
 
-        # Not a confirmed match, but not necessarily confirmed-safe either
-        # — score it as "unconfirmed" per the spec's weight table so an
-        # unfamiliar-but-not-yet-flagged site still contributes to the
-        # session score.
+        # Not a confirmed match — check it against the URL-risk heuristic
+        # (models/keyword_rules.py:check_url_risk) rather than treating
+        # every not-yet-confirmed URL as risky. Most browsing is neither
+        # confirmed-malicious nor scam-shaped, and should score 0/not be
+        # saved at all, same as any other "safe" signal.
         multiplier = _get_multiplier(payload.child_id, db)
-        weight = round(get_weight("url_visit", "unconfirmed") * multiplier)
+        url_risk = check_url_risk(url)
+
+        if url_risk is None:
+            return {"status": "checked, not saved (safe)", "blocked": False, "event_id": None}
+
+        weight = round(url_risk["weight"] * multiplier)
 
         if weight == 0:
             return {"status": "checked, not saved (safe)", "blocked": False, "event_id": None}
@@ -298,7 +312,20 @@ def ingest_url(
         }
 
     multiplier = _get_multiplier(payload.child_id, db)
-    weight = round(get_weight("url_visit", "unconfirmed") * multiplier)
+    url_risk = check_url_risk(payload.url)
+
+    if url_risk is None:
+        return {
+            "status": "checked, not saved (safe)",
+            "event_id": None,
+            "type": "url",
+            "is_safe": is_safe,
+            "risk_label": "safe",
+            "alert_triggred": False,
+            "alert": None
+        }
+
+    weight = round(url_risk["weight"] * multiplier)
 
     if weight == 0:
         return {
@@ -391,8 +418,12 @@ def ingest_events(
                     risk_label = "confirmed_scam"
                     weight = 0
                 else:
-                    risk_label = "unconfirmed"
-                    weight = round(get_weight("url_visit", "unconfirmed") * multiplier)
+                    url_risk = check_url_risk(url)
+                    if url_risk is not None:
+                        risk_label = "unconfirmed"
+                        weight = round(url_risk["weight"] * multiplier)
+                    # else: ordinary browsing, stays risk_label="safe"/weight=0
+                    # and gets skipped below like any other safe signal.
 
         elif event.eventType == "search":
             signal_type = "search_query"

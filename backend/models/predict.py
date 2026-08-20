@@ -19,6 +19,8 @@ from pathlib import Path
 import joblib
 import numpy as np
 
+from core.scoring import get_weight
+
 _MODEL_PATH = Path(__file__).resolve().parent / "kawach_classifier.joblib"
 _pipeline = None  # loaded lazily on first call, so importing this file is cheap
 
@@ -35,20 +37,24 @@ def _load_model():
     return _pipeline
 
 
-def predict_risk(text: str) -> dict:
+def predict_risk(text: str, signal_type: str = "chat_text") -> dict:
     """
     Classify a piece of text into one of: safe, scam, concealment, grooming.
 
     Args:
         text: raw text to classify (e.g. a search query or chat message)
+        signal_type: one of search_query | url_visit | page_text | chat_text —
+            used only to look up the right point value for the label via
+            core/scoring.py, doesn't affect the classification itself.
 
     Returns:
-        {"label": "safe" | "scam" | "grooming" | "concealment", "confidence": 0.0-1.0}
+        {"label": "safe" | "scam" | "grooming" | "concealment",
+         "confidence": 0.0-1.0, "weight": int}
     """
     if not text or not text.strip():
         # Empty input — default to safe with zero confidence rather than crashing,
         # so a blank/whitespace event never blocks the ingest pipeline.
-        return {"label": "safe", "confidence": 0.0}
+        return {"label": "safe", "confidence": 0.0, "weight": 0}
 
     pipeline = _load_model()
     cleaned = text.strip().lower()
@@ -69,7 +75,11 @@ def predict_risk(text: str) -> dict:
     classes = list(pipeline.classes_)
     confidence = float(proba[classes.index(label)])
 
-    return {"label": str(label), "confidence": round(confidence, 4)}
+    return {
+        "label": str(label),
+        "confidence": round(confidence, 4),
+        "weight": get_weight(signal_type, str(label)),
+    }
 
 
 if __name__ == "__main__":

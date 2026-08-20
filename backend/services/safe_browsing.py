@@ -69,3 +69,4 @@ if __name__ == "__main__":
     for url in test_urls:
         result = check_url_safety(url)
         print(f"{url} -> safe: {result}")
+

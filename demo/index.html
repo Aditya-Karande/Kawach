@@ -25,9 +25,39 @@
     <label>Child ID
       <input id="childId" placeholder="demo_child_001" value="demo_child_001">
     </label>
-    <label>Scenario
+    <div class="mode-toggle" role="radiogroup" aria-label="Demo mode">
+      <label class="mode-option">
+        <input type="radio" name="demoMode" value="custom" checked>
+        Custom build-up
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="demoMode" value="story">
+        Guided story (multi-signal)
+      </label>
+    </div>
+
+    <div id="customControls" class="custom-controls">
+      <label>Signal to showcase
+        <select id="signalType">
+          <option value="chat_text">Chat messages</option>
+          <option value="search_query">Search queries</option>
+          <option value="url_visit">Website visits</option>
+          <option value="file_upload" disabled>File upload (not scored yet)</option>
+        </select>
+      </label>
+      <label>Build up to
+        <select id="targetLevel">
+          <option value="safe">Safe (no threat)</option>
+          <option value="tier2">Tier 2 — gentle nudge</option>
+          <option value="tier3" selected>Tier 3 — parent alerted</option>
+        </select>
+      </label>
+    </div>
+
+    <label id="storyControls" class="story-controls hidden">Scenario
       <select id="scenario"></select>
     </label>
+
     <div class="actions">
       <button id="resetSession" class="secondary">New session</button>
       <button id="stepBtn" class="primary">Step ▶</button>
@@ -36,6 +66,8 @@
     </div>
     <div class="session-info">Session: <span id="sessionId">—</span></div>
   </section>
+
+  <div id="ladderPreview" class="ladder-preview hidden"></div>
 
   <section class="board">
     <div class="chat-pane">
@@ -56,6 +88,12 @@
       <div id="alertCard" class="alert-card hidden"></div>
     </div>
   </section>
+
+  <div id="nudgeToast" class="nudge-toast hidden" role="status">
+    <span class="nudge-icon">💡</span>
+    <span id="nudgeToastText" class="nudge-text"></span>
+    <button id="nudgeToastClose" class="nudge-close" aria-label="Dismiss">×</button>
+  </div>
 
   <footer>
     This tool sends fictional, scripted messages to your own backend for demo/testing

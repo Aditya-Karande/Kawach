@@ -2,6 +2,12 @@ const els = {
   backendUrl: document.getElementById('backendUrl'),
   childId: document.getElementById('childId'),
   scenario: document.getElementById('scenario'),
+  signalType: document.getElementById('signalType'),
+  targetLevel: document.getElementById('targetLevel'),
+  customControls: document.getElementById('customControls'),
+  storyControls: document.getElementById('storyControls'),
+  modeRadios: document.querySelectorAll('input[name="demoMode"]'),
+  ladderPreview: document.getElementById('ladderPreview'),
   resetSession: document.getElementById('resetSession'),
   stepBtn: document.getElementById('stepBtn'),
   autoplayBtn: document.getElementById('autoplayBtn'),
@@ -12,8 +18,32 @@ const els = {
   scoreVal: document.getElementById('scoreVal'),
   tierBadge: document.getElementById('tierBadge'),
   signalLog: document.getElementById('signalLog'),
-  alertCard: document.getElementById('alertCard')
+  alertCard: document.getElementById('alertCard'),
+  nudgeToast: document.getElementById('nudgeToast'),
+  nudgeToastText: document.getElementById('nudgeToastText'),
+  nudgeToastClose: document.getElementById('nudgeToastClose')
 };
+
+function currentMode() {
+  return document.querySelector('input[name="demoMode"]:checked')?.value || 'custom';
+}
+
+// Same copy as extension/src/background/service-worker.js's
+// NUDGE_MESSAGE, so the demo shows exactly what the child would see.
+const NUDGE_MESSAGE = 'Heads up — sites like this often ask for personal info. Be careful before sharing anything.';
+let nudgeTimer = null;
+
+function showNudgeToast(message) {
+  clearTimeout(nudgeTimer);
+  els.nudgeToastText.textContent = message;
+  els.nudgeToast.classList.remove('hidden');
+  nudgeTimer = setTimeout(hideNudgeToast, 10000);
+}
+function hideNudgeToast() {
+  els.nudgeToast.classList.add('hidden');
+  clearTimeout(nudgeTimer);
+}
+els.nudgeToastClose.addEventListener('click', hideNudgeToast);
 
 let state = {
   sessionId: null,
@@ -37,7 +67,49 @@ function populateScenarios() {
 }
 
 function currentScenario() {
+  if (currentMode() === 'custom') {
+    return buildCustomScenario(els.signalType.value, els.targetLevel.value);
+  }
   return SCENARIOS[els.scenario.value];
+}
+
+function renderLadderPreview() {
+  const scenario = currentScenario();
+  els.ladderPreview.classList.remove('hidden');
+
+  let html = `<div class="lp-title">${escapeHtml(scenario.label)} — ${escapeHtml(scenario.description)}</div>`;
+  scenario.steps.forEach((step, i) => {
+    const weightMatch = findStepWeight(step);
+    const weightText = weightMatch === 0 ? '0' : `+${weightMatch}`;
+    html += `
+      <div class="lp-row pending" data-step="${i}">
+        <div class="lp-step-num">${i + 1}</div>
+        <div class="lp-content">${escapeHtml(truncate(step.content, 70))}</div>
+        <div class="lp-weight ${weightMatch === 0 ? 'zero' : 'positive'}">${weightText}</div>
+        <div class="lp-cumulative">score →</div>
+      </div>`;
+  });
+  els.ladderPreview.innerHTML = html;
+}
+
+// Looks up a step's declared weight from the ladders/safe-steps tables
+// (falls back to 0) purely for the preview display — the ACTUAL score
+// always comes back from the real backend response, this is just so
+// you can see what to expect before pressing Step.
+function findStepWeight(step) {
+  const safe = (SAFE_STEPS[step.signalType] || []).find(s => s.content === step.content);
+  if (safe) return 0;
+  const rung = (ESCALATION_LADDERS[step.signalType] || []).find(s => s.content === step.content);
+  if (rung) return rung.weight;
+  return 0;
+}
+
+function markLadderStepDone(index) {
+  const row = els.ladderPreview.querySelector(`.lp-row[data-step="${index}"]`);
+  if (row) {
+    row.classList.remove('pending');
+    row.classList.add('done');
+  }
 }
 
 function resetSession() {
@@ -52,8 +124,17 @@ function restartScenario() {
   els.signalLog.innerHTML = '';
   els.alertCard.classList.add('hidden');
   els.alertCard.innerHTML = '';
+  hideNudgeToast();
   updateScoreUI(0, null);
   resetSession();
+  renderLadderPreview();
+}
+
+function applyMode() {
+  const mode = currentMode();
+  els.customControls.classList.toggle('hidden', mode !== 'custom');
+  els.storyControls.classList.toggle('hidden', mode !== 'story');
+  restartScenario();
 }
 
 function updateScoreUI(score, tier) {
@@ -145,6 +226,7 @@ async function runStep() {
 
   const step = scenario.steps[state.stepIndex];
   renderChatMessage(step.speaker, step.content, step.note);
+  markLadderStepDone(state.stepIndex);
 
   const response = await sendSignal(step);
   renderSignalLogEntry(step, response || {});
@@ -152,7 +234,16 @@ async function runStep() {
   const outcome = response?.outcome;
   if (outcome && typeof outcome.score === 'number') {
     updateScoreUI(outcome.score, outcome.tier);
-    if (outcome.tier === 3) renderAlertCard(outcome);
+    // Tier 2 = in-browser nudge shown to the child (outcome.nudge is
+    // true, see core/correlation_engine.py) — this was never rendered
+    // here, so tier-2 steps silently did nothing but flip the badge.
+    if (outcome.tier === 2 && outcome.nudge) {
+      showNudgeToast(NUDGE_MESSAGE);
+      renderChatMessage('system', 'Nudge shown to child (not sent to parent)', 'In-browser toast — see bottom-right');
+    } else if (outcome.tier === 3) {
+      hideNudgeToast();
+      renderAlertCard(outcome);
+    }
   }
 
   state.stepIndex++;
@@ -181,6 +272,9 @@ els.resetSession.addEventListener('click', () => {
 
 els.restartBtn.addEventListener('click', restartScenario);
 els.scenario.addEventListener('change', restartScenario);
+els.signalType.addEventListener('change', restartScenario);
+els.targetLevel.addEventListener('change', restartScenario);
+els.modeRadios.forEach(r => r.addEventListener('change', applyMode));
 
 populateScenarios();
-restartScenario();
+applyMode();

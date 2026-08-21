@@ -40,6 +40,50 @@ function send(event) {
   chrome.runtime.sendMessage({ type: 'RECORD_EVENT', event }).catch(() => {});
 }
 
+// --- tier-2 nudge toast (spec Section 4.5) ---
+// Framed as a safety tip, not a warning. Deliberately does not say this
+// was logged or that a parent will be told — that's the whole point of
+// it being a "nudge" rather than an alert.
+function showNudgeToast(message) {
+  const existing = document.getElementById('kawach-nudge-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'kawach-nudge-toast';
+  toast.setAttribute('role', 'status');
+  toast.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;
+    max-width: 320px; padding: 14px 16px; border-radius: 10px;
+    background: #fff8e6; border: 1px solid #f2c94c; color: #4a3b00;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    display: flex; align-items: flex-start; gap: 10px;
+  `;
+  const icon = document.createElement('span');
+  icon.textContent = '💡';
+  icon.style.cssText = 'flex-shrink: 0; font-size: 16px; line-height: 1;';
+  const text = document.createElement('span');
+  text.textContent = message;
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', 'Dismiss');
+  closeBtn.style.cssText = 'margin-left: auto; background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; color: #4a3b00; padding: 0 0 0 8px;';
+  closeBtn.addEventListener('click', () => toast.remove());
+
+  toast.appendChild(icon);
+  toast.appendChild(text);
+  toast.appendChild(closeBtn);
+  document.documentElement.appendChild(toast);
+
+  setTimeout(() => { if (toast.isConnected) toast.remove(); }, 10000);
+}
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'KAWACH_NUDGE') {
+    showNudgeToast(message.message);
+  }
+});
+
 document.addEventListener('change', event => {
   if (!monitoringEnabled) return;
   const input = event.target;

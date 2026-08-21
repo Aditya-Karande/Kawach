@@ -6,6 +6,7 @@ import { addEvent, getEvents, getPendingEvents, clearAllEvents, removePending } 
 import { HttpBackendAdapter } from '../transport/backend-adapter.js';
 import { detectSearch } from '../collectors/search-collector.js';
 import { getSessionId } from '../session/session.js';
+import { DEFAULT_SETTINGS } from '../privacy/defaults.js';
 
 const STATUS_POLL_ALARM = 'kawach-status-poll';
 const STATUS_POLL_MINUTES = 5;
@@ -13,7 +14,6 @@ const STATUS_POLL_MINUTES = 5;
 chrome.runtime.onInstalled.addListener(async () => {
   const s = await chrome.storage.local.get('settings');
   if (!s.settings) {
-    const { DEFAULT_SETTINGS } = await import('../privacy/defaults.js');
     await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   }
   chrome.alarms.create(STATUS_POLL_ALARM, { periodInMinutes: STATUS_POLL_MINUTES });
@@ -22,6 +22,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(STATUS_POLL_ALARM, { periodInMinutes: STATUS_POLL_MINUTES });
 });
+
 
 async function currentSettings() { return getSettings(); }
 
@@ -35,7 +36,7 @@ function adapterFor(settings, sessionId) {
   });
 }
 
-async function record(event, sourceUrl = '') {
+async function record(event, sourceUrl = '', tabId = null) {
   const settings = await currentSettings();
   if (!settings.monitoringEnabled) return { ignored: true };
   const candidateUrl = sourceUrl || event.data?.url || event.data?.pageUrl || event.data?.sourceUrl || '';
@@ -45,6 +46,13 @@ async function record(event, sourceUrl = '') {
     console.warn('Rejected event', check.errors);
     return { ignored: true, errors: check.errors };
   }
+  // Tag the event with the tab it came from so that if a tier-2 nudge
+  // comes back for it later (syncNow can run well after the event was
+  // captured, since events are queued), we know which tab to show the
+  // in-browser toast in. This never leaves the extension — the signal
+  // payload sent to the backend (backend-adapter.js) is built from an
+  // explicit field list and doesn't include tabId.
+  if (tabId != null) event.tabId = tabId;
   await addEvent(event);
   if (settings.backendEnabled) syncNow(settings).catch(() => {});
   return { saved: true, event };
@@ -55,10 +63,10 @@ chrome.webNavigation.onCommitted.addListener(async details => {
   const settings = await currentSettings();
   if (!settings.collectVisits || shouldIgnore(details.url, settings)) return;
   const data = { domain: hostnameFromUrl(details.url), pageTitle: '', url: settings.urlMode === 'full' ? details.url : undefined };
-  await record(makeEvent(EVENT_TYPES.PAGE_VISIT, data), details.url);
+  await record(makeEvent(EVENT_TYPES.PAGE_VISIT, data), details.url, details.tabId);
   if (settings.collectSearches) {
     const searchEvent = detectSearch(details.url);
-    if (searchEvent && !shouldIgnore(details.url, settings)) await record(searchEvent, details.url);
+    if (searchEvent && !shouldIgnore(details.url, settings)) await record(searchEvent, details.url, details.tabId);
   }
   if (settings.collectPageMetadata) {
     chrome.tabs.get(details.tabId).then(tab => {
@@ -115,7 +123,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
     if (message?.type === 'RECORD_EVENT') {
-      const result = await record(message.event);
+      // Content-script events (chat_message, search, form_submission,
+      // file_upload, page_text) come from `sender.tab`, since they're
+      // sent via chrome.runtime.sendMessage from inside that tab.
+      const result = await record(message.event, '', sender.tab?.id ?? null);
       sendResponse({ ok: true, result });
       return;
     }
@@ -156,6 +167,18 @@ async function pairDevice(settings, pairingCode) {
   return result;
 }
 
+// Fixed copy per spec Section 4.5: framed as a safety tip, never states
+// that this was logged or that a parent will be told.
+const NUDGE_MESSAGE = 'Heads up — sites like this often ask for personal info. Be careful before sharing anything.';
+
+function maybeShowNudge(event, outcome) {
+  if (!outcome?.nudge) return;
+  if (event.tabId == null) return; // no known origin tab (e.g. came from popup/legacy path) — nothing to message
+  chrome.tabs.sendMessage(event.tabId, { type: 'KAWACH_NUDGE', message: NUDGE_MESSAGE }).catch(() => {
+    // Tab may have navigated away or closed since the event was queued — fine to drop silently.
+  });
+}
+
 async function syncNow(settings) {
   if (!settings.backendEnabled) return { success: false, error: 'Backend disabled' };
   const pending = await getPendingEvents();
@@ -176,8 +199,16 @@ async function syncNow(settings) {
   for (const event of signalEvents) {
     try {
       const result = await adapter.sendSignal(event);
-      if (result.success) sentIds.push(event.eventId);
-      else signalFailures++;
+      if (result.success) {
+        sentIds.push(event.eventId);
+        // Spec Section 4.5 / 5: tier 2 means "in-browser nudge shown to
+        // the child" — this is the part that was never implemented.
+        // The backend already computes outcome.nudge correctly
+        // (core/correlation_engine.py); we just weren't reading it.
+        maybeShowNudge(event, result.outcome);
+      } else {
+        signalFailures++;
+      }
     } catch {
       signalFailures++;
     }

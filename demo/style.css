@@ -68,3 +68,64 @@ button { border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 700; c
 .alert-severity { margin-top: 6px; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .05em; color: #991b1b; }
 
 footer { margin-top: 24px; font-size: 11px; color: #9ca3af; text-align: center; }
+
+/* Tier-2 nudge toast — mirrors the real in-browser toast the extension
+   shows (extension/src/content/content-script.js showNudgeToast), so
+   the demo actually visualizes what a tier-2 result does instead of
+   only updating the badge text. */
+.nudge-toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+  max-width: 320px; padding: 14px 16px; border-radius: 10px;
+  background: #fff8e6; border: 1px solid #f2c94c; color: #4a3b00;
+  font-size: 13px; line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  display: flex; align-items: flex-start; gap: 10px;
+  animation: nudge-in .2s ease-out;
+}
+.nudge-toast.hidden { display: none; }
+.nudge-icon { flex-shrink: 0; font-size: 16px; line-height: 1; }
+.nudge-text { flex: 1; }
+.nudge-close {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-size: 18px; line-height: 1; color: #4a3b00; padding: 0;
+}
+@keyframes nudge-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Custom build-up mode controls (new) --- */
+.mode-toggle {
+  grid-column: 1 / -1; display: flex; gap: 18px; align-items: center;
+  font-size: 12px; font-weight: 700; color: #374151; margin-top: -2px;
+}
+.mode-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; }
+.mode-option input { width: auto; margin: 0; }
+
+.custom-controls, .story-controls {
+  grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.story-controls { grid-template-columns: 1fr; }
+.custom-controls.hidden, .story-controls.hidden { display: none; }
+
+select:disabled { color: #b0b5bd; cursor: not-allowed; }
+
+.ladder-preview {
+  margin-top: 14px; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px;
+  padding: 14px 16px;
+}
+.ladder-preview.hidden { display: none; }
+.ladder-preview .lp-title { font-size: 12px; font-weight: 800; color: #6b7280; margin-bottom: 10px; }
+.lp-row {
+  display: grid; grid-template-columns: 26px 1fr 70px 70px; gap: 10px; align-items: center;
+  padding: 6px 0; border-top: 1px solid #f0f1f4; font-size: 12.5px;
+}
+.lp-row:first-child { border-top: 0; }
+.lp-step-num { font-weight: 800; color: #9ca3af; }
+.lp-content { color: #374151; }
+.lp-weight { text-align: right; font-weight: 800; }
+.lp-weight.zero { color: #9ca3af; }
+.lp-weight.positive { color: #b45309; }
+.lp-cumulative { text-align: right; color: #6b7280; font-family: monospace; }
+.lp-row.pending { opacity: .55; }
+.lp-row.done { background: #f7faf7; }

@@ -8,12 +8,16 @@ from core.security import get_current_parent
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 # Bounds for the per-child weight multiplier the feedback loop adjusts.
-# Never fully zeroes out future scoring, and never amplifies past 1.0 —
-# feedback can only make the system less trigger-happy for a child who
-# keeps getting false positives, not more.
+# Never fully zeroes out future scoring (floor), and never runs away
+# unbounded (ceiling). "not_a_concern" verdicts step the multiplier down
+# toward the floor (system gets less trigger-happy for this child).
+# "reviewed" (confirmed real) verdicts step it up toward the ceiling, so
+# a child with a track record of real concerns gets scored as higher-risk
+# going forward, not just walked back to the 1.0 baseline.
 MULTIPLIER_FLOOR = 0.4
+MULTIPLIER_CEILING = 1.5
 MULTIPLIER_STEP_DOWN = 0.9   # applied on "not_a_concern"
-MULTIPLIER_STEP_UP = 1.05    # applied on "reviewed" (confirmed real), capped at 1.0
+MULTIPLIER_STEP_UP = 1.05    # applied on "reviewed" (confirmed real)
 
 
 class FeedbackRequest(BaseModel):
@@ -102,15 +106,16 @@ def submit_feedback(
     # Bump the child's per-signal weight multiplier (Section 7.1). A
     # string of "not_a_concern" verdicts gradually raises the bar for
     # future alerts on this child; a "reviewed" (confirmed real) verdict
-    # nudges it back toward normal so the system doesn't stay
-    # permanently desensitized after one legitimate alert.
+    # raises the multiplier toward MULTIPLIER_CEILING, so repeated
+    # confirmed concerns make future scoring more sensitive for this
+    # child instead of just resetting to the 1.0 baseline.
     child = db.query(Child).filter(Child.child_id == alert.child_id).first()
     if child is not None:
         current = child.weight_multiplier or 1.0
         if payload.parent_verdict == "not_a_concern":
             child.weight_multiplier = max(MULTIPLIER_FLOOR, round(current * MULTIPLIER_STEP_DOWN, 3))
         else:
-            child.weight_multiplier = min(1.0, round(current * MULTIPLIER_STEP_UP, 3))
+            child.weight_multiplier = min(MULTIPLIER_CEILING, round(current * MULTIPLIER_STEP_UP, 3))
 
     db.commit()
 

@@ -141,10 +141,10 @@ def load_children():
     conn = get_connection()
     try:
         df = pd.read_sql_query(
-            "SELECT child_id, monitoring_status, parent_id, weight_multiplier FROM children", conn
+            "SELECT child_id, name, age, monitoring_status, parent_id, weight_multiplier FROM children", conn
         )
     except Exception:
-        df = pd.DataFrame(columns=["child_id", "monitoring_status", "parent_id", "weight_multiplier"])
+        df = pd.DataFrame(columns=["child_id", "name", "age", "monitoring_status", "parent_id", "weight_multiplier"])
     conn.close()
     return df
 
@@ -162,6 +162,25 @@ def get_all_child_ids():
         ids = []
     conn.close()
     return sorted(i for i in ids if i)
+
+
+def get_child_name_map():
+    """child_id -> display name, e.g. 'Aarav (Age 12)' — falls back to
+    the raw child_id itself for events/alerts belonging to a child_id
+    that doesn't have a children row (e.g. old test data)."""
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query("SELECT child_id, name, age FROM children", conn)
+    except Exception:
+        df = pd.DataFrame(columns=["child_id", "name", "age"])
+    conn.close()
+    names = {}
+    for _, row in df.iterrows():
+        label = row["name"] or row["child_id"]
+        if pd.notna(row["age"]):
+            label = f"{label} (Age {int(row['age'])})"
+        names[row["child_id"]] = label
+    return names
 
 
 def format_time_ago(ts_str):
@@ -215,8 +234,13 @@ except Exception as e:
 # Child selector
 # -----------------------------
 all_child_ids = get_all_child_ids()
+child_names = get_child_name_map()
 child_options = ["All"] + all_child_ids
-selected_child = st.sidebar.selectbox("Child", child_options)
+selected_child = st.sidebar.selectbox(
+    "Child",
+    child_options,
+    format_func=lambda cid: "All children" if cid == "All" else child_names.get(cid, cid),
+)
 
 
 # -----------------------------
@@ -228,18 +252,22 @@ st.sidebar.subheader("Create a test child")
 if not st.session_state.token:
     st.sidebar.caption("Log in above first.")
 else:
-    new_child_id = st.sidebar.text_input("New child_id", value="child_001")
+    new_child_name = st.sidebar.text_input("Child's name", value="Aarav")
+    new_child_age = st.sidebar.number_input("Age", min_value=1, max_value=17, value=12, step=1)
     if st.sidebar.button("Create child + get pairing code", width='stretch'):
         try:
             r = requests.post(
                 f"{backend_url}/api/children",
-                json={"child_id": new_child_id},
+                json={"name": new_child_name, "age": int(new_child_age)},
                 headers=auth_headers(),
                 timeout=5,
             )
             if r.status_code == 201:
                 data = r.json()
-                st.sidebar.success(f"Created. Pairing code: {data['pairing_code']}")
+                st.sidebar.success(
+                    f"Created **{data['name']}** — child_id: `{data['child_id']}`  \n"
+                    f"Pairing code: {data['pairing_code']}"
+                )
             else:
                 st.sidebar.error(f"Failed: {r.json().get('detail', r.text)}")
         except Exception as e:
@@ -299,7 +327,10 @@ if not st.session_state.token:
 elif not all_child_ids:
     st.sidebar.caption("Create a child first.")
 else:
-    guardian_child_id = st.sidebar.selectbox("Child", all_child_ids, key="guardian_child")
+    guardian_child_id = st.sidebar.selectbox(
+        "Child", all_child_ids, key="guardian_child",
+        format_func=lambda cid: child_names.get(cid, cid),
+    )
     guardian_email = st.sidebar.text_input("Guardian email", key="guardian_email_input")
     if st.sidebar.button("Add guardian", width='stretch'):
         try:
@@ -363,7 +394,8 @@ else:
             c1, c2 = st.columns([5, 1])
             with c1:
                 st.markdown(
-                    f"**{label}** — child: `{alert['child_id']}` &nbsp;|&nbsp; "
+                    f"**{label}** — child: **{child_names.get(alert['child_id'], alert['child_id'])}** "
+                    f"(`{alert['child_id']}`) &nbsp;|&nbsp; "
                     f"score: {alert['score']} &nbsp;|&nbsp; status: `{alert['status']}`"
                 )
                 if explanation:

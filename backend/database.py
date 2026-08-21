@@ -32,6 +32,12 @@ class Child(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     child_id = Column(String, unique=True, index=True, nullable=False)
+    # Display info for the parent dashboard's child-switcher screen
+    # (e.g. "Aarav, Age 12"). child_id itself stays a separate, stable
+    # identifier used everywhere else (events, alerts, pairing) so
+    # renaming a child later never breaks existing data.
+    name = Column(String, nullable=False)
+    age = Column(Integer, nullable=True)
     parent_id = Column(Integer, ForeignKey("parents.id"), nullable=True, index=True)
     monitoring_status = Column(String, default="on")
     pairing_code = Column(String, unique=True, index=True, nullable=True)

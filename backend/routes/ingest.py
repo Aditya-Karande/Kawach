@@ -35,6 +35,18 @@ NON_ACTIONABLE_EVENT_TYPES = {"page_metadata"}
 
 VALID_SIGNAL_TYPES = {"search_query", "url_visit", "page_text", "chat_text"}
 
+# Below this, the ML classifier's own confidence is too close to chance
+# (0.25 baseline across 4 classes: safe/scam/concealment/grooming) to act
+# on. Keyword matches (models/keyword_rules.py) are exact-phrase and
+# always high-precision, so this threshold ONLY applies to the ML
+# fallback path — see _classify_signal below. Tuned against real
+# examples: genuinely risky phrasing the keyword list misses (e.g. "this
+# can be our little secret ok", "whats ur snap so we can talk more
+# privately") scores 0.57-0.72; benign chatter the model over-flags
+# (e.g. "hii saw ur comment on that game clip, you're really good at
+# this") scores 0.31-0.52. 0.55 sits in the gap between them.
+ML_CONFIDENCE_THRESHOLD = 0.55
+
 
 # ---------------------------------------------------------------------
 # schemas
@@ -112,6 +124,13 @@ def _classify_signal(signal_type: str, content: str, child_multiplier: float) ->
             label = ml_result["label"]
             confidence = ml_result["confidence"]
             base_weight = ml_result["weight"]
+            # A low-confidence ML guess isn't solid enough evidence to
+            # score or store on its own — this is what was letting
+            # borderline compliments/small talk get flagged as
+            # "grooming" at ~35-50% confidence, barely above random.
+            # Downgrade to safe rather than acting on a coin-flip label.
+            if label != "safe" and confidence < ML_CONFIDENCE_THRESHOLD:
+                label, base_weight = "safe", 0
         except Exception as e:
             # Model file missing/corrupt, or any other classifier failure —
             # fail open to "safe" rather than 500ing the whole ingest

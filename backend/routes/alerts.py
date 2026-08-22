@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import get_db, Alert, Event, Child, Feedback, Parent
+from database import get_db, Alert, Event, Child, Feedback, Parent, to_utc_iso
 from core.security import get_current_parent
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -64,16 +64,20 @@ def get_alerts(
             "score": alert.score,
             "status": alert.status,
             "ai_explanation": alert.ai_explanation,
-            "timestamp": alert.timestamp,
-            "updated_at": alert.updated_at,
+            # Frontend's Alert type (and formatDate/relativeTime) reads
+            # `created_at` — sending this as `timestamp` left it undefined
+            # on the client, which crashed formatDate with a RangeError
+            # the moment a new alert rendered.
+            "created_at": to_utc_iso(alert.timestamp),
+            "updated_at": to_utc_iso(alert.updated_at),
             "score_breakdown": [
                 {
                     "event_id": e.id,
-                    "signal_type": e.signal_type,
+                    "type": e.signal_type,
                     "risk_label": e.risk_label,
                     "weight": e.weight,
                     "content": e.content,
-                    "timestamp": e.timestamp,
+                    "timestamp": to_utc_iso(e.timestamp),
                 }
                 for e in contributing_events
             ],

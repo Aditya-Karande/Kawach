@@ -11,6 +11,21 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False,bind=engine)
 
 Base = declarative_base()
 
+# SQLite's DateTime column silently drops tzinfo, even though every model
+# below writes datetime.now(timezone.utc). So a timestamp that's actually
+# UTC comes back out of the DB "naive", and FastAPI serializes it without
+# a `Z`/offset (e.g. "2026-08-22T10:46:00"). The browser's `new Date(...)`
+# then has no way to know it's UTC and renders it as raw local time —
+# for an IST user that's a silent 5:30 hr shift (this is the "alert says
+# 10:40 AM but was actually 4:16 PM" bug). Stamp it back to UTC on the way
+# out so the ISO string always carries an explicit offset.
+def to_utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
 # TABLES.
 
 class Parent(Base):

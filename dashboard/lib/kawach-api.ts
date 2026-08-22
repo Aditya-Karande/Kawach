@@ -29,20 +29,33 @@ export const addChild = async (body: object) => normalizeChild(await apiFetch<an
 // Backend's ToggleRequest.status is `"on" | "off" | null`, not a boolean —
 // send the string it actually expects.
 export const toggleMonitoring = (child_id: string, status: boolean) => apiFetch('/api/monitoring/toggle', { method: 'POST', body: JSON.stringify({ child_id, status: status ? 'on' : 'off' }) })
-export const getGuardians = (id: string) => apiFetch<string[]>(`/api/guardians/${id}`)
+// Backend returns each guardian as `{ id, email }`, not a bare string —
+// rendering the raw objects in <GuardiansView> is what threw "Objects
+// are not valid as React child (found: object with keys {id, email})"
+// the moment a guardian list actually had entries. Normalize to emails here.
+export const getGuardians = async (id: string) => (await apiFetch<any[]>(`/api/guardians/${id}`)).map((g: any) => (typeof g === 'string' ? g : g.email))
 export const addGuardian = (body: object) => apiFetch('/api/guardians', { method: 'POST', body: JSON.stringify(body) })
-export const demoChildren: Child[] = [{ id: 'maya', name: 'Maya', age: 12, monitoring_status: true }, { id: 'noah', name: 'Noah', age: 9, monitoring_status: false, pairing_code: 'KWC-4821' }]
-export const demoAlerts: Alert[] = [{ id: 'a1', child_id: 'maya', score: 87, status: 'new', created_at: new Date(Date.now() - 2700000).toISOString(), ai_explanation: { severity_label: 'severe', what_happened: 'A conversation included language that may indicate a risky interaction.', why_it_matters: 'The pattern is worth a calm check-in with Maya.', recommended_action: 'Ask an open question about who she was talking to and how it made her feel.' }, score_breakdown: [{ type: 'language', risk_label: 'high', weight: 0.7, content: 'Potentially coercive language detected' }] }, { id: 'a2', child_id: 'maya', score: 42, status: 'reviewed', created_at: new Date(Date.now() - 18000000).toISOString(), ai_explanation: { severity_label: 'moderate', what_happened: 'A message contained a mild safety signal.', why_it_matters: 'Context can help determine whether this was ordinary conversation.', recommended_action: 'Keep an eye on the conversation context.' } }]
-export const demoGuardians = ['alex@example.com', 'jordan@example.com']
-export function relativeTime(value: string) { const minutes = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 60000)); return minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} hr ago` : `${Math.round(minutes / 1440)} days ago` }
-export function formatDate(value: string) { return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
+// Guards against missing/malformed timestamps (e.g. a field rename or
+// backfilled row without one) so a single bad alert can't crash the
+// whole feed with "RangeError: Invalid time value".
+function safeDate(value?: string) { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date }
+export function relativeTime(value?: string) { const date = safeDate(value); if (!date) return 'unknown time'; const minutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000)); return minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} hr ago` : `${Math.round(minutes / 1440)} days ago` }
+export function formatDate(value?: string) { const date = safeDate(value); return date ? new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date) : 'Unknown date' }
 export function severityTone(label?: string) { return label === 'severe' || label === 'critical' ? 'severe' : label === 'high' ? 'high' : 'moderate' }
 export function childStatus(child: Child) { return child.monitoring_status === true }
 export function initials(name: string) { return name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() }
 export function clearAuth() { setToken(null) }
 export function logout() { clearAuth(); if (typeof window !== 'undefined') window.location.href = '/' }
 export function getParentEmail() { return typeof window === 'undefined' ? 'parent@example.com' : sessionStorage.getItem('kawach_email') || 'parent@example.com' }
-export async function safeChildren() { try { return await getChildren() } catch { return demoChildren } }
-export async function safeAlerts(id: string) { try { return await getAlerts(id) } catch { return demoAlerts.filter(item => item.child_id === id) } }
-export async function safeGuardians(id: string) { try { return await getGuardians(id) } catch { return id === 'maya' ? demoGuardians : [] } }
+// These used to fall back to hardcoded demo data (a fake Maya/Noah,
+// alex@example.com/jordan@example.com) on ANY fetch failure — not just
+// "backend totally unreachable," but also a stale/mismatched id, a 404,
+// or a transient network blip. That's a dangerous failure mode for a
+// child-safety product: a real error would silently disguise itself as
+// real-looking (but fake) alerts and guardians. Fail to an honest empty
+// state instead — the UI already has proper empty-state messaging for
+// "no data yet" vs. "something's wrong."
+export async function safeChildren() { try { return await getChildren() } catch { return [] } }
+export async function safeAlerts(id: string) { try { return await getAlerts(id) } catch { return [] } }
+export async function safeGuardians(id: string) { try { return await getGuardians(id) } catch { return [] } }
 export async function safeAction<T>(action: () => Promise<T>) { try { return await action() } catch { return null } }

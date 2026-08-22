@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import get_db, Child, Parent
+from database import get_db, Child, Parent, to_utc_iso
 from core.security import get_current_parent
 from routes.auth import generate_pairing_code
 
@@ -40,7 +40,7 @@ def list_children(
             "age": c.age,
             "monitoring_status": c.monitoring_status,
             "pairing_code": c.pairing_code,  # null once the extension has paired
-            "created_at": c.created_at,
+            "created_at": to_utc_iso(c.created_at),
         }
         for c in children
     ]

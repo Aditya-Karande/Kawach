@@ -42,6 +42,13 @@ function safeDate(value?: string) { if (!value) return null; const date = new Da
 export function relativeTime(value?: string) { const date = safeDate(value); if (!date) return 'unknown time'; const minutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000)); return minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} hr ago` : `${Math.round(minutes / 1440)} days ago` }
 export function formatDate(value?: string) { const date = safeDate(value); return date ? new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date) : 'Unknown date' }
 export function severityTone(label?: string) { return label === 'severe' || label === 'critical' ? 'severe' : label === 'high' ? 'high' : 'moderate' }
+// Traffic-light status for a child based on their total alert count.
+// 0-1 => green (all calm), 2-3 => yellow (worth a look), 4+ => red
+// (needs attention). Counts every alert regardless of reviewed status,
+// since a track record of confirmed concerns is still relevant context.
+export type RiskTone = 'green' | 'yellow' | 'red'
+export function riskTone(alertCount: number): RiskTone { return alertCount <= 1 ? 'green' : alertCount <= 3 ? 'yellow' : 'red' }
+export function riskLabel(tone: RiskTone) { return tone === 'green' ? 'All calm' : tone === 'yellow' ? 'Worth a look' : 'Needs attention' }
 export function childStatus(child: Child) { return child.monitoring_status === true }
 export function initials(name: string) { return name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() }
 export function clearAuth() { setToken(null) }

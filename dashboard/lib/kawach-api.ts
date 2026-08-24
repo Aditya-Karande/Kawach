@@ -7,6 +7,7 @@ export function apiBase() { return process.env.NEXT_PUBLIC_API_BASE_URL || proce
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> { const response = await fetch(`${apiBase()}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}), ...init?.headers } }); if (response.status === 401) { setToken(null); if (typeof window !== 'undefined') window.location.href = '/?auth=login' }; if (!response.ok) throw new Error('Unable to complete that request'); return response.json() }
 export const auth = (kind: 'login' | 'signup', body: object) => apiFetch<{ access_token: string }>(`/api/auth/${kind}`, { method: 'POST', body: JSON.stringify(body) })
 // The backend identifies a child with `child_id` and stores monitoring
+//
 // status as the string "on" / "off". The rest of this app works with
 // `id` (string) and `monitoring_status` (boolean), so every child object
 // coming back from the API is normalized here — this is also what fixes

@@ -1,76 +1,50 @@
-# Kawach  Browser Activity Monitor
+# कवच · Kawach
 
-## About the Project
+Kawach is a browser activity monitoring and security-focused Chrome extension designed to provide an additional layer of protection while users interact with the web. The project focuses on identifying potentially risky or suspicious online activities by collecting selected browser activity with the user's knowledge and consent.
 
-Kawach is a Chrome browser extension designed to monitor selected browser activities with user consent. It is connected to the Kawach backend, which analyzes the collected activities using a weighted-scoring system.
+In today's digital environment, users interact with a wide variety of websites, search engines, online communication platforms, and file-sharing services. These interactions can sometimes expose users to potentially harmful, suspicious, or unsafe content. Kawach aims to address this challenge by monitoring relevant browser activities and analyzing them to identify patterns that may indicate potential risk.
+
+The Kawach system consists of a Chrome browser extension connected to a backend analysis system. The extension is responsible for detecting and collecting selected browser activities, while the backend processes this information using a weighted-scoring approach. Different activities can be assigned different levels of importance, allowing the system to calculate an overall risk score based on the observed activity.
 
 The main goal of Kawach is to provide a safety layer for online browser activity and help identify potentially risky activities.
 
 ## Features
+- Graduated 3-tier response (not binary block/allow)
+- Keyword rules + TF-IDF/SVM ML classifier, with a confidence gate
+- LLM (Groq) re-checks tier-3 clusters for false positives before alerting
+- Per-child feedback loop adjusts sensitivity over time
+- Privacy-first: no passwords/keystrokes/chat history/file contents captured
+- JWT-authenticated, ownership-scoped parent dashboard
+- Fails safe if Safe Browsing / LLM / SMTP are down
 
-The extension can detect:
+## Tech stack
+- **Extension:** Chrome Manifest V3, vanilla JS
+- **Backend:** FastAPI, SQLAlchemy + SQLite, JWT auth
+- **ML:** scikit-learn (TF-IDF + Linear SVM)
+- **External APIs:** Google Safe Browsing, Groq LLM
+- **Dashboard:** Next.js 16, React 19, Tailwind CSS
+- **Scheduling/Email:** APScheduler, smtplib
 
-- Website visits
-- Search queries
-- Sent chat messages
-- Visible webpage text
-- File uploads
-- File downloads
-- Form submission metadata
-- Page and domain information
+## Quick start
 
-## How It Works
+**Backend**
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
 
-The basic working flow is:
+**Dashboard**
+```bash
+cd dashboard
+pnpm install
+echo "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000" > .env.local
+pnpm dev
+```
 
-User Browser  
-↓  
-Kawach Chrome Extension  
-↓  
-Activity Detection  
-↓  
-SafeSignal/Kawach Backend  
-↓  
-Risk Analysis  
-↓  
-Parent Dashboard
+**Extension**
+Load unpacked from `extension/` at `chrome://extensions`, set the backend URL in Options, pair using the code from the dashboard.
 
-The extension collects selected browser activities and sends the required information to the backend for analysis.
-
-## Privacy and Security
-
-Kawach is designed for consent-based monitoring.
-
-The extension does not capture:
-
-- Passwords
-- Authentication tokens
-- Cookies
-- Unrestricted keystrokes
-- Unsent chat drafts
-- Chat history
-
-For file uploads, the extension collects basic file information such as the filename, file type, size and upload details. The actual file content is not read or sent.
-
-## Setting Up the Extension
-
-1. Open Chrome.
-2. Go to `chrome://extensions`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the `extension` folder from the Kawach project.
-6. Open the Kawach extension and review its settings.
-
-## Backend Connection
-
-The browser extension can be connected to the SafeSignal/Kawach backend using a one-time pairing code.
-
-After the device is paired, selected browser activities can be sent to the backend for processing.
-
-## Project Purpose
-
-Kawach aims to make online browsing safer by monitoring selected browser activities, analyzing potentially risky signals and providing authorized monitoring through the SafeSignal/Kawach system.
-
-## Contribution
-
-This contribution adds clear project documentation explaining the purpose, features, working process, privacy measures and setup instructions of the Kawach project.
+## License
+Not yet added — recommend MIT or Apache-2.0.

@@ -1,0 +1,69 @@
+export type Child = { id: string; name: string; age: number; monitoring_status?: boolean; pairing_code?: string | null }
+export type Alert = { id: string; child_id: string; score: number; status: string; created_at: string; ai_explanation?: { what_happened?: string; why_it_matters?: string; recommended_action?: string; severity_label?: string }; score_breakdown?: Array<{ type?: string; risk_label?: string; weight?: number; content?: string; timestamp?: string }> }
+let token: string | null = null
+export function getToken() { if (typeof window !== 'undefined') token ||= sessionStorage.getItem('kawach_token'); return token }
+export function setToken(value: string | null) { token = value; if (typeof window !== 'undefined') value ? sessionStorage.setItem('kawach_token', value) : sessionStorage.removeItem('kawach_token') }
+export function apiBase() { return process.env.NEXT_PUBLIC_API_BASE_URL || process.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000' }
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> { const response = await fetch(`${apiBase()}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}), ...init?.headers } }); if (response.status === 401) { setToken(null); if (typeof window !== 'undefined') window.location.href = '/?auth=login' }; if (!response.ok) throw new Error('Unable to complete that request'); return response.json() }
+export const auth = (kind: 'login' | 'signup', body: object) => apiFetch<{ access_token: string }>(`/api/auth/${kind}`, { method: 'POST', body: JSON.stringify(body) })
+// The backend identifies a child with `child_id` and stores monitoring
+//
+// status as the string "on" / "off". The rest of this app works with
+// `id` (string) and `monitoring_status` (boolean), so every child object
+// coming back from the API is normalized here — this is also what fixes
+// the "toggling one child toggles all of them" bug: without this mapping
+// every child.id was undefined, so the toggle handler's `item.id === child.id`
+// check matched every row at once.
+function normalizeChild(raw: any): Child {
+    return {
+        id: raw.id ?? raw.child_id,
+        name: raw.name,
+        age: raw.age,
+        monitoring_status: raw.monitoring_status === true || raw.monitoring_status === 'on',
+        pairing_code: raw.pairing_code ?? null,
+    }
+}
+export const getChildren = async () => (await apiFetch<any[]>('/api/children')).map(normalizeChild)
+export const getAlerts = (id: string) => apiFetch<Alert[]>(`/api/alerts/${id}`)
+export const feedback = (id: string, verdict: string) => apiFetch(`/api/alerts/${id}/feedback`, { method: 'POST', body: JSON.stringify({ parent_verdict: verdict }) })
+export const addChild = async (body: object) => normalizeChild(await apiFetch<any>('/api/children', { method: 'POST', body: JSON.stringify(body) }))
+// Backend's ToggleRequest.status is `"on" | "off" | null`, not a boolean —
+// send the string it actually expects.
+export const toggleMonitoring = (child_id: string, status: boolean) => apiFetch('/api/monitoring/toggle', { method: 'POST', body: JSON.stringify({ child_id, status: status ? 'on' : 'off' }) })
+// Backend returns each guardian as `{ id, email }`, not a bare string —
+// rendering the raw objects in <GuardiansView> is what threw "Objects
+// are not valid as React child (found: object with keys {id, email})"
+// the moment a guardian list actually had entries. Normalize to emails here.
+export const getGuardians = async (id: string) => (await apiFetch<any[]>(`/api/guardians/${id}`)).map((g: any) => (typeof g === 'string' ? g : g.email))
+export const addGuardian = (body: object) => apiFetch('/api/guardians', { method: 'POST', body: JSON.stringify(body) })
+// Guards against missing/malformed timestamps (e.g. a field rename or
+// backfilled row without one) so a single bad alert can't crash the
+// whole feed with "RangeError: Invalid time value".
+function safeDate(value?: string) { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date }
+export function relativeTime(value?: string) { const date = safeDate(value); if (!date) return 'unknown time'; const minutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000)); return minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} hr ago` : `${Math.round(minutes / 1440)} days ago` }
+export function formatDate(value?: string) { const date = safeDate(value); return date ? new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date) : 'Unknown date' }
+export function severityTone(label?: string) { return label === 'severe' || label === 'critical' ? 'severe' : label === 'high' ? 'high' : 'moderate' }
+// Traffic-light status for a child based on their total alert count.
+// 0-1 => green (all calm), 2-3 => yellow (worth a look), 4+ => red
+// (needs attention). Counts every alert regardless of reviewed status,
+// since a track record of confirmed concerns is still relevant context.
+export type RiskTone = 'green' | 'yellow' | 'red'
+export function riskTone(alertCount: number): RiskTone { return alertCount <= 1 ? 'green' : alertCount <= 3 ? 'yellow' : 'red' }
+export function riskLabel(tone: RiskTone) { return tone === 'green' ? 'All calm' : tone === 'yellow' ? 'Worth a look' : 'Needs attention' }
+export function childStatus(child: Child) { return child.monitoring_status === true }
+export function initials(name: string) { return name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() }
+export function clearAuth() { setToken(null) }
+export function logout() { clearAuth(); if (typeof window !== 'undefined') window.location.href = '/' }
+export function getParentEmail() { return typeof window === 'undefined' ? 'parent@example.com' : sessionStorage.getItem('kawach_email') || 'parent@example.com' }
+// These used to fall back to hardcoded demo data (a fake Maya/Noah,
+// alex@example.com/jordan@example.com) on ANY fetch failure — not just
+// "backend totally unreachable," but also a stale/mismatched id, a 404,
+// or a transient network blip. That's a dangerous failure mode for a
+// child-safety product: a real error would silently disguise itself as
+// real-looking (but fake) alerts and guardians. Fail to an honest empty
+// state instead — the UI already has proper empty-state messaging for
+// "no data yet" vs. "something's wrong."
+export async function safeChildren() { try { return await getChildren() } catch { return [] } }
+export async function safeAlerts(id: string) { try { return await getAlerts(id) } catch { return [] } }
+export async function safeGuardians(id: string) { try { return await getGuardians(id) } catch { return [] } }
+export async function safeAction<T>(action: () => Promise<T>) { try { return await action() } catch { return null } }

@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Kawach Browser Activity Monitor",
+  "version": "2.0.0",
+  "description": "Consent-based browser activity monitoring: uploads, downloads, searches, visits, chat messages, and page text, scored by the SafeSignal/Kawach backend.",
+  "permissions": ["storage", "tabs", "webNavigation", "downloads", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Kawach",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_page": "src/options/options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/collectors/chat-collector.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {}
+}

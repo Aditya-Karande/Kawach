@@ -1,6 +1,6 @@
 # कवच · Kawach
 
-Kawach is a browser activity monitoring and security-focused Chrome extension designed to provide an additional layer of protection while users interact with the web. The project focuses on identifying potentially risky or suspicious online activities by collecting selected browser activity with the user's knowledge and consent.
+Kawach is a browser activity monitoring and security-focused Chrome extension designed to provide an additional layer of protection while users interact with the website. The project focuses on identifying potentially risky or suspicious online activities by collecting selected browser activity with the user's knowledge and consent.
 
 In today's digital environment, users interact with a wide variety of websites, search engines, online communication platforms, and file-sharing services. These interactions can sometimes expose users to potentially harmful, suspicious, or unsafe content. Kawach aims to address this challenge by monitoring relevant browser activities and analyzing them to identify patterns that may indicate potential risk.
 
@@ -9,7 +9,7 @@ The Kawach system consists of a Chrome browser extension connected to a backend 
 The main goal of Kawach is to provide a safety layer for online browser activity and help identify potentially risky activities.
 
 ## Features
-- Graduated 3-tier response (not binary block/allow)
+- Graduated 3-tier in response (not binary block/allow)
 - Keyword rules + TF-IDF/SVM ML classifier, with a confidence gate
 - LLM (Groq) re-checks tier-3 clusters for false positives before alerting
 - Per-child feedback loop adjusts sensitivity over time
